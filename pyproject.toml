@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "minixx"
+name = "ark"
 version = "0.1.0"
 description = "Didactic Python framework for building code agents"
 readme = "README.md"
@@ -11,7 +11,7 @@ requires-python = ">=3.11"
 dependencies = ["openai>=1.0.0", "pytest>=8.0.0"]
 
 [project.scripts]
-minixx = "minixx.agentic_loop:main"
+ark = "ark.agentic_loop:main"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

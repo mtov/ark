@@ -2,25 +2,25 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from minixx.agentic_loop import (
+from ark.agentic_loop import (
     INVALID_FINISH_MESSAGE,
     MAX_ITERATIONS_REACHED_MESSAGE,
     LoopResult,
     Memory,
     agentic_loop,
 )
-from minixx.cli_output import (
+from ark.cli_output import (
     format_elapsed_time,
     format_failure_message,
     format_success_message,
     print_elapsed_time,
     print_final_result,
 )
-from minixx.finish_handler import FinishResult
-from minixx.inputs import AgentConfig
-from minixx.models import ModelConfig
-from minixx.protocol import ToolRequest
-from minixx.test_failures import summarize_test_failure_output
+from ark.finish_handler import FinishResult
+from ark.inputs import AgentConfig
+from ark.models import ModelConfig
+from ark.protocol import ToolRequest
+from ark.test_failures import summarize_test_failure_output
 
 
 def build_context() -> AgentConfig:
@@ -45,7 +45,7 @@ def test_format_success_message_for_unified_diff_patch() -> None:
         LoopResult.success("--- a/file.py\n+++ b/file.py\n@@ -1 +1 @@\n-old\n+new\n"),
     )
 
-    assert result == "Minixx result: success. Patch applied successfully."
+    assert result == "Ark result: success. Patch applied successfully."
 
 
 def test_format_success_message_mentions_post_apply_tests_when_available() -> None:
@@ -57,7 +57,7 @@ def test_format_success_message_mentions_post_apply_tests_when_available() -> No
         ),
     )
 
-    assert result == "Minixx result: success. Patch applied successfully. Post-apply tests passed."
+    assert result == "Ark result: success. Patch applied successfully. Post-apply tests passed."
 
 
 def test_format_success_message_for_non_patch_results() -> None:
@@ -66,19 +66,19 @@ def test_format_success_message_for_non_patch_results() -> None:
         LoopResult.success("Task completed successfully."),
     )
 
-    assert result == "Minixx result: success. Task completed successfully."
+    assert result == "Ark result: success. Task completed successfully."
 
 
 def test_format_success_message_for_empty_results() -> None:
     result = format_success_message("  ", LoopResult.success("  "))
 
-    assert result == "Minixx result: success."
+    assert result == "Ark result: success."
 
 
 def test_format_failure_message() -> None:
     result = format_failure_message(ValueError("Post-apply tests failed"))
 
-    assert result == "Minixx result: failed. Post-apply tests failed"
+    assert result == "Ark result: failed. Post-apply tests failed"
 
 
 def test_format_elapsed_time_under_one_minute() -> None:
@@ -97,7 +97,7 @@ def test_print_final_result_prints_summary_for_unified_diff_patches(capsys) -> N
 
     captured = capsys.readouterr()
 
-    assert captured.out == "Minixx result: success. Patch applied successfully.\n"
+    assert captured.out == "Ark result: success. Patch applied successfully.\n"
 
 
 def test_print_final_result_mentions_post_apply_tests_when_available(capsys) -> None:
@@ -111,7 +111,7 @@ def test_print_final_result_mentions_post_apply_tests_when_available(capsys) -> 
 
     captured = capsys.readouterr()
 
-    assert captured.out == "Minixx result: success. Patch applied successfully. Post-apply tests passed.\n"
+    assert captured.out == "Ark result: success. Patch applied successfully. Post-apply tests passed.\n"
 
 
 def test_print_final_result_prints_summary_for_non_patch_results(capsys) -> None:
@@ -122,7 +122,7 @@ def test_print_final_result_prints_summary_for_non_patch_results(capsys) -> None
 
     captured = capsys.readouterr()
 
-    assert captured.out == "Minixx result: success. Task completed successfully.\n"
+    assert captured.out == "Ark result: success. Task completed successfully.\n"
 
 
 def test_print_elapsed_time(capsys) -> None:
@@ -151,9 +151,9 @@ def test_agentic_loop_retries_after_invalid_finish(monkeypatch, capsys) -> None:
         seen_histories.append(history.to_text())
         return next(responses)
 
-    monkeypatch.setattr("minixx.agentic_loop.get_next_tool_request", fake_get_next_tool_request)
+    monkeypatch.setattr("ark.agentic_loop.get_next_tool_request", fake_get_next_tool_request)
     monkeypatch.setattr(
-        "minixx.agentic_loop.apply_finish",
+        "ark.agentic_loop.apply_finish",
         lambda _context, tool_request: FinishResult(status="applied", request=tool_request),
     )
 
@@ -208,10 +208,10 @@ def test_agentic_loop_retries_after_post_apply_test_failure(monkeypatch, capsys)
         reset_calls.append(runtime_context.source_workspace_path)
         runtime_context.workspace_path = Path("/tmp/reset-runtime")
 
-    monkeypatch.setattr("minixx.agentic_loop.get_next_tool_request", fake_get_next_tool_request)
-    monkeypatch.setattr("minixx.agentic_loop.apply_finish", fake_apply_finish)
-    monkeypatch.setattr("minixx.agentic_loop.reset_runtime_workspace", fake_reset_runtime_workspace)
-    monkeypatch.setattr("minixx.agentic_loop.run_tool", lambda _tool_request, _context: "file contents")
+    monkeypatch.setattr("ark.agentic_loop.get_next_tool_request", fake_get_next_tool_request)
+    monkeypatch.setattr("ark.agentic_loop.apply_finish", fake_apply_finish)
+    monkeypatch.setattr("ark.agentic_loop.reset_runtime_workspace", fake_reset_runtime_workspace)
+    monkeypatch.setattr("ark.agentic_loop.run_tool", lambda _tool_request, _context: "file contents")
 
     result = agentic_loop(context)
     captured = capsys.readouterr()
@@ -261,14 +261,14 @@ def test_agentic_loop_returns_error_result_when_max_iterations_reached(monkeypat
     context = build_context()
 
     monkeypatch.setattr(
-        "minixx.agentic_loop.get_next_tool_request",
+        "ark.agentic_loop.get_next_tool_request",
         lambda _context, _history: ToolRequest(
             thought="still exploring",
             name="list_files",
             args=".",
         ),
     )
-    monkeypatch.setattr("minixx.agentic_loop.run_tool", lambda _tool_request, _context: "src\ntests")
+    monkeypatch.setattr("ark.agentic_loop.run_tool", lambda _tool_request, _context: "src\ntests")
 
     result = agentic_loop(context)
 

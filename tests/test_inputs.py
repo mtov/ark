@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from minixx import inputs
+from ark import inputs
 
 
 def test_prepare_runtime_workspace_recreates_fixed_directory(tmp_path: Path, monkeypatch) -> None:
@@ -11,7 +11,7 @@ def test_prepare_runtime_workspace_recreates_fixed_directory(tmp_path: Path, mon
     source_workspace.mkdir()
     (source_workspace / "prompt.txt").write_text("first prompt", encoding="utf-8")
 
-    runtime_workspace = tmp_path / "minixx-workspace"
+    runtime_workspace = tmp_path / "ark-workspace"
     monkeypatch.setattr(inputs, "RUNTIME_WORKSPACE_PATH", runtime_workspace)
 
     prepared_workspace = inputs.prepare_runtime_workspace(source_workspace)
@@ -51,7 +51,7 @@ def test_prepare_run_keeps_agents_md_out_of_system_prompt(tmp_path: Path, monkey
         encoding="utf-8",
     )
 
-    runtime_workspace = tmp_path / "minixx-workspace"
+    runtime_workspace = tmp_path / "ark-workspace"
     config_dir = tmp_path / "config"
     config_dir.mkdir()
     config_path = config_dir / "config.json"

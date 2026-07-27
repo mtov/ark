@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from minixx.models import extract_openai_content, extract_openai_usage
+from ark.models import extract_openai_content, extract_openai_usage
 
 
 def test_extract_openai_usage_uses_prompt_and_completion_tokens() -> None:

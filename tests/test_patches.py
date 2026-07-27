@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from minixx import patches
-from minixx.patches import auto_repair_patch_text, validate_patch, validate_and_repair_patch
+from ark import patches
+from ark.patches import auto_repair_patch_text, validate_patch, validate_and_repair_patch
 
 
 def write_sample_file(workspace_path: Path) -> None:

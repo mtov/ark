@@ -117,7 +117,7 @@ def resolve_openai_api_key(config: AgentConfig) -> str:
             "OpenAI-compatible",
         )
 
-    return os.environ.get("OPENAI_API_KEY", "minixx")
+    return os.environ.get("OPENAI_API_KEY", "ark")
 
 
 def call_openai_compatible(config: AgentConfig, user_prompt: str) -> ModelResponse:

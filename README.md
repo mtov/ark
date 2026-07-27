@@ -1,15 +1,15 @@
-# Minixx
+# Ark
 
 <p align="center">
-  <img src="minixx.png" alt="Minixx logo" width="160">
+  <img src="ark.png" alt="Ark logo" width="160">
 </p>
 
-Minixx is a didactic Python project for studying how to build a small code agent.
+Ark is a didactic Python project for studying how to build a small code agent.
 It is an ongoing research project developed by [ASERG](https://aserg.labsoft.dcc.ufmg.br/) at DCC/UFMG.
 
 ## Overview
 
-Minixx is intentionally small.
+Ark is intentionally small.
 It focuses on one narrow workflow:
 
 1. load a workspace
@@ -23,9 +23,9 @@ The project is meant for learning, experimentation, and research rather than bro
 
 ## Design Principles
 
-- Minixx keeps the architecture intentionally small and readable.
-- Minixx isolates edits in a copied runtime workspace instead of modifying the original input workspace.
-- Minixx uses a single OpenAI-compatible chat API in the documented setup.
+- Ark keeps the architecture intentionally small and readable.
+- Ark isolates edits in a copied runtime workspace instead of modifying the original input workspace.
+- Ark uses a single OpenAI-compatible chat API in the documented setup.
 
 ## Quick Start
 
@@ -41,7 +41,7 @@ export OPENAI_API_KEY="your_key_here"
 Run:
 
 ```bash
-python run_minixx.py ./test_workspace/bugfix_001_date_range
+python run_ark.py ./test_workspace/bugfix_001_date_range
 ```
 
 The default configuration calls the OpenAI API directly.
@@ -49,17 +49,17 @@ If you want another OpenAI-compatible provider, set `openai_base_url` in `config
 
 What you should expect during a run:
 
-- Minixx prints the selected model and the loaded `prompt.txt`
-- it creates or refreshes `./minixx-workspace`
+- Ark prints the selected model and the loaded `prompt.txt`
+- it creates or refreshes `./ark-workspace`
 - the model chooses among a small set of tools
-- if the model finishes with a patch, Minixx prints the patch and asks for approval before running `git apply`
-- after patch application, Minixx runs tests automatically before reporting success
-- if post-apply tests fail, Minixx resets `./minixx-workspace` and asks the model for a different patch
-- when the run ends, Minixx prints the final status, total token usage, and elapsed time
+- if the model finishes with a patch, Ark prints the patch and asks for approval before running `git apply`
+- after patch application, Ark runs tests automatically before reporting success
+- if post-apply tests fail, Ark resets `./ark-workspace` and asks the model for a different patch
+- when the run ends, Ark prints the final status, total token usage, and elapsed time
 
 ## Configuration
 
-The default [config/config.json](/Users/mtov/minixx/config/config.json) is:
+The default [config/config.json](/Users/mtov/ark/config/config.json) is:
 
 ```json
 {
@@ -73,15 +73,15 @@ The default [config/config.json](/Users/mtov/minixx/config/config.json) is:
 
 Notes:
 
-- with `openai_base_url: null`, Minixx calls the default OpenAI API directly
+- with `openai_base_url: null`, Ark calls the default OpenAI API directly
 - the documented setup requires `OPENAI_API_KEY`
 - `openai_model` selects the concrete model used through the OpenAI-compatible path
 - `timeout_seconds` applies to the model request
-- `pytest` must be available in the same Python environment used to run Minixx
+- `pytest` must be available in the same Python environment used to run Ark
 
 ## Workspace Contract
 
-Minixx runs against a workspace directory passed on the command line.
+Ark runs against a workspace directory passed on the command line.
 Each workspace should contain:
 
 - `prompt.txt`
@@ -102,7 +102,7 @@ Validate the result with the available test action before finishing.
 In practice, the current example workspaces also follow this layout:
 
 - `src/` contains the buggy implementation
-- `tests/` contains the test suite used by Minixx
+- `tests/` contains the test suite used by Ark
 - `requirements.txt` documents the local dependency expectation for the workspace
 - `metadata.json` stores a small description of the task
 
@@ -112,7 +112,7 @@ Each workspace is designed to be executed from its own directory.
 That means:
 
 - imports like `from src.foo import bar` assume the current working directory is the workspace root
-- Minixx runs tests from inside the copied runtime workspace, not from the repository root
+- Ark runs tests from inside the copied runtime workspace, not from the repository root
 - if you manually validate a workspace, `cd` into that workspace first
 
 Example:
@@ -122,21 +122,21 @@ cd ./test_workspace/bugfix_001_date_range
 python -m pytest -q
 ```
 
-Minixx itself uses a fixed test command based on `python -m pytest -q -p no:cacheprovider` and does not allow arbitrary shell commands for testing.
+Ark itself uses a fixed test command based on `python -m pytest -q -p no:cacheprovider` and does not allow arbitrary shell commands for testing.
 
 ## Runtime Workspace
 
-For each run, Minixx copies the selected workspace into a fixed internal directory named `minixx-workspace`.
+For each run, Ark copies the selected workspace into a fixed internal directory named `ark-workspace`.
 The original workspace is preserved.
-All reads, test runs, patch validation, and patch application happen only inside `minixx-workspace`.
+All reads, test runs, patch validation, and patch application happen only inside `ark-workspace`.
 
-This gives Minixx a predictable temporary working area with a stable path across runs.
-Before the next run, Minixx deletes the previous `minixx-workspace` and recreates it from the new source workspace.
+This gives Ark a predictable temporary working area with a stable path across runs.
+Before the next run, Ark deletes the previous `ark-workspace` and recreates it from the new source workspace.
 
 This has a few important consequences:
 
 - the source workspace is treated as input only
-- all tool actions are constrained to `minixx-workspace`
+- all tool actions are constrained to `ark-workspace`
 - patch validation and patch application happen only in the copied workspace
 - the runtime workspace is disposable and is recreated on the next run
 
@@ -160,10 +160,10 @@ These workspaces are designed so that:
 
 ## Patch Workflow
 
-When Minixx finishes a task, it expects a unified diff patch.
-That patch is saved to `minixx-workspace/patch.txt`.
+When Ark finishes a task, it expects a unified diff patch.
+That patch is saved to `ark-workspace/patch.txt`.
 
-Before applying the patch, Minixx:
+Before applying the patch, Ark:
 
 1. validates the patch structure
 2. attempts lightweight automatic repair for common diff formatting issues
@@ -171,9 +171,9 @@ Before applying the patch, Minixx:
 4. prints the full patch as a command preview
 5. asks the user for approval
 
-If the user approves, Minixx runs `git apply patch.txt` inside `minixx-workspace`.
+If the user approves, Ark runs `git apply patch.txt` inside `ark-workspace`.
 
-After the patch is applied, Minixx also runs tests automatically.
+After the patch is applied, Ark also runs tests automatically.
 If the post-apply test run does not pass, the runtime workspace is reset to the original source state and the model must try again with a different patch.
 If the model tries to `finish` without returning a unified diff patch, that finish is rejected and the run continues.
 
@@ -187,21 +187,21 @@ The patch helper also normalizes a few common formatting problems before validat
 Manual validation:
 
 ```bash
-cd ./minixx-workspace
+cd ./ark-workspace
 git apply --check patch.txt
 git apply patch.txt
 ```
 
 ## How One Run Works
 
-1. Minixx loads `config/config.json` and `config/system_prompt.txt`.
-2. Minixx resolves the source workspace passed on the command line.
-3. Minixx recreates `minixx-workspace` as a copy of that source workspace.
-4. Minixx loads `prompt.txt` and optional `AGENTS.md` from the copied workspace and builds the user-side workspace context.
+1. Ark loads `config/config.json` and `config/system_prompt.txt`.
+2. Ark resolves the source workspace passed on the command line.
+3. Ark recreates `ark-workspace` as a copy of that source workspace.
+4. Ark loads `prompt.txt` and optional `AGENTS.md` from the copied workspace and builds the user-side workspace context.
 5. `agentic_loop.py` asks the configured model for the next action.
-6. `tools.py` executes the selected tool inside `minixx-workspace`.
+6. `tools.py` executes the selected tool inside `ark-workspace`.
 7. When the model returns `finish`, `finish_handler.py` validates the output and routes patch application through `patches.py`.
-8. If a patch is approved and applied, Minixx runs post-apply tests before accepting the run.
+8. If a patch is approved and applied, Ark runs post-apply tests before accepting the run.
 
 ```mermaid
 sequenceDiagram
@@ -233,28 +233,28 @@ flowchart LR
 The codebase is intentionally small and can be read as six main modules:
 
 - `Agent Loop and Memory`
-  - `src/minixx/agentic_loop.py`: runs the main ReAct-style loop and owns loop-local runtime structures such as `Memory`, `MemoryEntry`, and `LoopResult`
+  - `src/ark/agentic_loop.py`: runs the main ReAct-style loop and owns loop-local runtime structures such as `Memory`, `MemoryEntry`, and `LoopResult`
 - `Setup and Config`
-  - `src/minixx/inputs.py`: loads config and prompts, resolves the source workspace, prepares `minixx-workspace`, and defines `AgentConfig`
+  - `src/ark/inputs.py`: loads config and prompts, resolves the source workspace, prepares `ark-workspace`, and defines `AgentConfig`
 - `Model Protocol`
-  - `src/minixx/models.py`: defines model request and response dataclasses and sends requests to the configured model backend
-  - `src/minixx/protocol.py`: defines `ToolRequest` and parses, validates, and repairs model responses into Minixx actions
+  - `src/ark/models.py`: defines model request and response dataclasses and sends requests to the configured model backend
+  - `src/ark/protocol.py`: defines `ToolRequest` and parses, validates, and repairs model responses into Ark actions
 - `Tools`
-  - `src/minixx/tools.py`: implements the available workspace-safe tools
-  - `src/minixx/guards.py`: validates safe paths and keeps tool access constrained to the runtime workspace
+  - `src/ark/tools.py`: implements the available workspace-safe tools
+  - `src/ark/guards.py`: validates safe paths and keeps tool access constrained to the runtime workspace
 - `Patch`
-  - `src/minixx/finish_handler.py`: validates `finish` outputs, defines `FinishResult`, and orchestrates patch apply plus verification
-  - `src/minixx/patches.py`: saves, repairs, previews, validates, and applies unified diff patches
-  - `src/minixx/test_failures.py`: summarizes post-apply test failures for retry prompts
+  - `src/ark/finish_handler.py`: validates `finish` outputs, defines `FinishResult`, and orchestrates patch apply plus verification
+  - `src/ark/patches.py`: saves, repairs, previews, validates, and applies unified diff patches
+  - `src/ark/test_failures.py`: summarizes post-apply test failures for retry prompts
 - `Observability`
-  - `src/minixx/cli_output.py`: formats iteration lines, final status messages, and elapsed time
-  - `src/minixx/traces.py`: writes execution traces and related debug artifacts such as `agent_trace.log`
+  - `src/ark/cli_output.py`: formats iteration lines, final status messages, and elapsed time
+  - `src/ark/traces.py`: writes execution traces and related debug artifacts such as `agent_trace.log`
 
 Supporting files used around that runtime flow:
 
-- `run_minixx.py`: repository entry script
-- `src/minixx/__main__.py`: package entry point
-- `src/minixx/__init__.py`: package marker
+- `run_ark.py`: repository entry script
+- `src/ark/__main__.py`: package entry point
+- `src/ark/__init__.py`: package marker
 - `config/config.json`: model and runtime settings
 - `config/system_prompt.txt`: main agent instructions
 
@@ -284,7 +284,7 @@ The model responds using:
 
 ## Tracing
 
-Minixx writes execution traces to `agent_trace.log`.
+Ark writes execution traces to `agent_trace.log`.
 That file is cleared at the beginning of each new run, so it always represents only the most recent execution.
 Each model response also records token usage when the provider exposes it, plus a cumulative total for the run.
 The CLI also prints the total elapsed time at the end of the run.
@@ -303,8 +303,8 @@ It uses short section headers such as:
 
 ## Security and Limits
 
-- Minixx never modifies the original input workspace
-- file and directory tool paths are restricted to `minixx-workspace`
+- Ark never modifies the original input workspace
+- file and directory tool paths are restricted to `ark-workspace`
 - `run_tests` uses a fixed command, not arbitrary shell execution
 - patch application requires explicit user approval
 - the project assumes cooperative local execution and does not try to provide OS-level sandboxing
@@ -312,7 +312,7 @@ It uses short section headers such as:
 
 ## Current Scope
 
-Minixx is intentionally narrow.
+Ark is intentionally narrow.
 It does not try to be:
 
 - a general autonomous coding agent

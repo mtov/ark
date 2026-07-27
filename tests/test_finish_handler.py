@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from minixx.finish_handler import apply_finish
-from minixx.inputs import AgentConfig
-from minixx.models import ModelConfig
-from minixx.protocol import ToolRequest
+from ark.finish_handler import apply_finish
+from ark.inputs import AgentConfig
+from ark.models import ModelConfig
+from ark.protocol import ToolRequest
 
 
 def build_context(tmp_path: Path, user_prompt: str) -> AgentConfig:
@@ -34,11 +34,11 @@ def test_handle_finish_runs_post_apply_tests_for_bug_fix(monkeypatch, tmp_path: 
     )
     calls: list[str] = []
 
-    monkeypatch.setattr("minixx.finish_handler.validate_and_repair_patch", lambda *_args: tool_request.args)
-    monkeypatch.setattr("minixx.finish_handler.save_patch", lambda *_args: calls.append("save_patch"))
-    monkeypatch.setattr("minixx.finish_handler.apply_patch", lambda *_args: calls.append("apply_patch"))
-    monkeypatch.setattr("minixx.finish_handler.run_tests_with_status", lambda *_args: (True, "1 passed"))
-    monkeypatch.setattr("minixx.finish_handler.trace_finish_event", lambda *_args: None)
+    monkeypatch.setattr("ark.finish_handler.validate_and_repair_patch", lambda *_args: tool_request.args)
+    monkeypatch.setattr("ark.finish_handler.save_patch", lambda *_args: calls.append("save_patch"))
+    monkeypatch.setattr("ark.finish_handler.apply_patch", lambda *_args: calls.append("apply_patch"))
+    monkeypatch.setattr("ark.finish_handler.run_tests_with_status", lambda *_args: (True, "1 passed"))
+    monkeypatch.setattr("ark.finish_handler.trace_finish_event", lambda *_args: None)
 
     result = apply_finish(context, tool_request)
 
@@ -61,11 +61,11 @@ def test_handle_finish_runs_post_apply_tests_for_feature_task(monkeypatch, tmp_p
         run_tests_called = True
         return True, "3 passed"
 
-    monkeypatch.setattr("minixx.finish_handler.validate_and_repair_patch", lambda *_args: tool_request.args)
-    monkeypatch.setattr("minixx.finish_handler.save_patch", lambda *_args: None)
-    monkeypatch.setattr("minixx.finish_handler.apply_patch", lambda *_args: None)
-    monkeypatch.setattr("minixx.finish_handler.run_tests_with_status", fake_run_tests)
-    monkeypatch.setattr("minixx.finish_handler.trace_finish_event", lambda *_args: None)
+    monkeypatch.setattr("ark.finish_handler.validate_and_repair_patch", lambda *_args: tool_request.args)
+    monkeypatch.setattr("ark.finish_handler.save_patch", lambda *_args: None)
+    monkeypatch.setattr("ark.finish_handler.apply_patch", lambda *_args: None)
+    monkeypatch.setattr("ark.finish_handler.run_tests_with_status", fake_run_tests)
+    monkeypatch.setattr("ark.finish_handler.trace_finish_event", lambda *_args: None)
 
     result = apply_finish(context, tool_request)
 
@@ -91,11 +91,11 @@ def test_handle_finish_runs_post_apply_tests_for_bugfix_without_keywords(monkeyp
         run_tests_called = True
         return True, "2 passed"
 
-    monkeypatch.setattr("minixx.finish_handler.validate_and_repair_patch", lambda *_args: tool_request.args)
-    monkeypatch.setattr("minixx.finish_handler.save_patch", lambda *_args: None)
-    monkeypatch.setattr("minixx.finish_handler.apply_patch", lambda *_args: None)
-    monkeypatch.setattr("minixx.finish_handler.run_tests_with_status", fake_run_tests)
-    monkeypatch.setattr("minixx.finish_handler.trace_finish_event", lambda *_args: None)
+    monkeypatch.setattr("ark.finish_handler.validate_and_repair_patch", lambda *_args: tool_request.args)
+    monkeypatch.setattr("ark.finish_handler.save_patch", lambda *_args: None)
+    monkeypatch.setattr("ark.finish_handler.apply_patch", lambda *_args: None)
+    monkeypatch.setattr("ark.finish_handler.run_tests_with_status", fake_run_tests)
+    monkeypatch.setattr("ark.finish_handler.trace_finish_event", lambda *_args: None)
 
     result = apply_finish(context, tool_request)
 
@@ -112,12 +112,12 @@ def test_handle_finish_raises_when_post_apply_tests_fail(monkeypatch, tmp_path: 
         args="--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new\n",
     )
 
-    monkeypatch.setattr("minixx.finish_handler.validate_and_repair_patch", lambda *_args: tool_request.args)
-    monkeypatch.setattr("minixx.finish_handler.save_patch", lambda *_args: None)
-    monkeypatch.setattr("minixx.finish_handler.apply_patch", lambda *_args: None)
-    monkeypatch.setattr("minixx.finish_handler.run_tests_with_status", lambda *_args: (False, "1 failed"))
+    monkeypatch.setattr("ark.finish_handler.validate_and_repair_patch", lambda *_args: tool_request.args)
+    monkeypatch.setattr("ark.finish_handler.save_patch", lambda *_args: None)
+    monkeypatch.setattr("ark.finish_handler.apply_patch", lambda *_args: None)
+    monkeypatch.setattr("ark.finish_handler.run_tests_with_status", lambda *_args: (False, "1 failed"))
     finish_events: list[tuple[str, str, str | None]] = []
-    monkeypatch.setattr("minixx.finish_handler.trace_finish_event", lambda *args: finish_events.append(args))
+    monkeypatch.setattr("ark.finish_handler.trace_finish_event", lambda *args: finish_events.append(args))
 
     result = apply_finish(context, tool_request)
 
@@ -141,11 +141,11 @@ def test_handle_finish_runs_post_apply_tests_for_readme_patch(monkeypatch, tmp_p
         run_tests_called = True
         return True, "1 passed"
 
-    monkeypatch.setattr("minixx.finish_handler.validate_and_repair_patch", lambda *_args: tool_request.args)
-    monkeypatch.setattr("minixx.finish_handler.save_patch", lambda *_args: None)
-    monkeypatch.setattr("minixx.finish_handler.apply_patch", lambda *_args: None)
-    monkeypatch.setattr("minixx.finish_handler.run_tests_with_status", fake_run_tests)
-    monkeypatch.setattr("minixx.finish_handler.trace_finish_event", lambda *_args: None)
+    monkeypatch.setattr("ark.finish_handler.validate_and_repair_patch", lambda *_args: tool_request.args)
+    monkeypatch.setattr("ark.finish_handler.save_patch", lambda *_args: None)
+    monkeypatch.setattr("ark.finish_handler.apply_patch", lambda *_args: None)
+    monkeypatch.setattr("ark.finish_handler.run_tests_with_status", fake_run_tests)
+    monkeypatch.setattr("ark.finish_handler.trace_finish_event", lambda *_args: None)
 
     result = apply_finish(context, tool_request)
 
@@ -181,11 +181,11 @@ def test_handle_finish_repairs_patch_when_request_args_looks_like_patch(monkeypa
     )
     saved_patches: list[str] = []
 
-    monkeypatch.setattr("minixx.finish_handler.validate_and_repair_patch", lambda *_args: repaired_patch)
-    monkeypatch.setattr("minixx.finish_handler.save_patch", lambda _path, patch: saved_patches.append(patch))
-    monkeypatch.setattr("minixx.finish_handler.apply_patch", lambda *_args: None)
-    monkeypatch.setattr("minixx.finish_handler.run_tests_with_status", lambda *_args: (True, "1 passed"))
-    monkeypatch.setattr("minixx.finish_handler.trace_finish_event", lambda *_args: None)
+    monkeypatch.setattr("ark.finish_handler.validate_and_repair_patch", lambda *_args: repaired_patch)
+    monkeypatch.setattr("ark.finish_handler.save_patch", lambda _path, patch: saved_patches.append(patch))
+    monkeypatch.setattr("ark.finish_handler.apply_patch", lambda *_args: None)
+    monkeypatch.setattr("ark.finish_handler.run_tests_with_status", lambda *_args: (True, "1 passed"))
+    monkeypatch.setattr("ark.finish_handler.trace_finish_event", lambda *_args: None)
 
     result = apply_finish(context, tool_request)
 
@@ -204,14 +204,14 @@ def test_handle_finish_rejects_mixed_output_when_tests_failed(monkeypatch, tmp_p
     )
     finish_events: list[tuple[str, str, str | None]] = []
 
-    monkeypatch.setattr("minixx.finish_handler.validate_and_repair_patch", lambda *_args: tool_request.args)
-    monkeypatch.setattr("minixx.finish_handler.save_patch", lambda *_args: None)
-    monkeypatch.setattr("minixx.finish_handler.apply_patch", lambda *_args: None)
+    monkeypatch.setattr("ark.finish_handler.validate_and_repair_patch", lambda *_args: tool_request.args)
+    monkeypatch.setattr("ark.finish_handler.save_patch", lambda *_args: None)
+    monkeypatch.setattr("ark.finish_handler.apply_patch", lambda *_args: None)
     monkeypatch.setattr(
-        "minixx.finish_handler.run_tests_with_status",
+        "ark.finish_handler.run_tests_with_status",
         lambda *_args: (False, "1 failed, 5 passed"),
     )
-    monkeypatch.setattr("minixx.finish_handler.trace_finish_event", lambda *args: finish_events.append(args))
+    monkeypatch.setattr("ark.finish_handler.trace_finish_event", lambda *args: finish_events.append(args))
 
     result = apply_finish(context, tool_request)
 
@@ -232,8 +232,8 @@ def test_handle_finish_traces_patch_validation_failures(monkeypatch, tmp_path: P
     def raise_patch_error(*_args):
         raise ValueError("corrupt patch")
 
-    monkeypatch.setattr("minixx.finish_handler.validate_and_repair_patch", raise_patch_error)
-    monkeypatch.setattr("minixx.finish_handler.trace_finish_event", lambda *args: finish_events.append(args))
+    monkeypatch.setattr("ark.finish_handler.validate_and_repair_patch", raise_patch_error)
+    monkeypatch.setattr("ark.finish_handler.trace_finish_event", lambda *args: finish_events.append(args))
 
     with pytest.raises(ValueError, match="corrupt patch"):
         apply_finish(context, tool_request)
@@ -242,7 +242,7 @@ def test_handle_finish_traces_patch_validation_failures(monkeypatch, tmp_path: P
 
 
 def test_handle_finish_rejects_non_patch_finish_output(monkeypatch, tmp_path: Path) -> None:
-    context = build_context(tmp_path, "Any Minixx task.")
+    context = build_context(tmp_path, "Any Ark task.")
     tool_request = ToolRequest(
         thought="done",
         name="finish",
@@ -250,7 +250,7 @@ def test_handle_finish_rejects_non_patch_finish_output(monkeypatch, tmp_path: Pa
     )
     finish_events: list[tuple[str, str, str | None]] = []
 
-    monkeypatch.setattr("minixx.finish_handler.trace_finish_event", lambda *args: finish_events.append(args))
+    monkeypatch.setattr("ark.finish_handler.trace_finish_event", lambda *args: finish_events.append(args))
 
     with pytest.raises(ValueError, match="Finish output must be a unified diff patch."):
         apply_finish(context, tool_request)

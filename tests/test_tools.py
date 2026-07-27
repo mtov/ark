@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from minixx import tools
+from ark import tools
 
 
 def test_read_file_returns_file_contents(tmp_path: Path) -> None:

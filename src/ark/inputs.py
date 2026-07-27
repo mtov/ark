@@ -10,7 +10,7 @@ from .models import ModelConfig
 from .traces import clear_trace, trace_request
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-RUNTIME_WORKSPACE_PATH = PROJECT_ROOT / "minixx-workspace"
+RUNTIME_WORKSPACE_PATH = PROJECT_ROOT / "ark-workspace"
 CONFIG_DIR = PROJECT_ROOT / "config"
 CONFIG_PATH = CONFIG_DIR / "config.json"
 SYSTEM_PROMPT_PATH = CONFIG_DIR / "system_prompt.txt"
@@ -47,7 +47,7 @@ def _read_text_file(
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Minixx")
+    parser = argparse.ArgumentParser(description="Ark")
     parser.add_argument("workspace_path", help="Path to the test workspace directory")
     return parser.parse_args()
 

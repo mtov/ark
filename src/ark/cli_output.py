@@ -54,18 +54,18 @@ def print_elapsed_time(elapsed_seconds: float) -> None:
 def format_success_message(result: str, loop_result: LoopResult) -> str:
     if looks_like_patch(result):
         if loop_result.post_apply_tests_passed:
-            return "Minixx result: success. Patch applied successfully. Post-apply tests passed."
-        return "Minixx result: success. Patch applied successfully."
+            return "Ark result: success. Patch applied successfully. Post-apply tests passed."
+        return "Ark result: success. Patch applied successfully."
 
     normalized_result = result.strip()
     if not normalized_result:
-        return "Minixx result: success."
+        return "Ark result: success."
 
-    return f"Minixx result: success. {normalized_result}"
+    return f"Ark result: success. {normalized_result}"
 
 
 def format_failure_message(error: Exception) -> str:
-    return f"Minixx result: failed. {error}"
+    return f"Ark result: failed. {error}"
 
 
 def print_final_result(result: str, loop_result: LoopResult) -> None:
