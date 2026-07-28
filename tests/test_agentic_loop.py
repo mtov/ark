@@ -8,6 +8,7 @@ from ark.agentic_loop import (
     LoopResult,
     Memory,
     agentic_loop,
+    summarize_patch_failure,
 )
 from ark.cli_output import (
     format_elapsed_time,
@@ -235,6 +236,54 @@ def test_agentic_loop_retries_after_post_apply_test_failure(monkeypatch, capsys)
     assert "Post-apply tests failed. The runtime workspace has been reset to the original source state." in seen_histories[1]
     assert "Use the failed test details below to produce a different patch." in seen_histories[1]
     assert "..F\nassert 1 == 2" in seen_histories[1]
+
+
+def test_agentic_loop_retries_after_patch_validation_failure(monkeypatch, capsys) -> None:
+    context = build_context()
+    responses = iter(
+        [
+            ToolRequest(
+                thought="first try",
+                name="finish",
+                args="--- a/file.py\n+++ b/file.py\n@@ -1 +1 @@\n-old\n+attempt1\n",
+            ),
+            ToolRequest(
+                thought="second try",
+                name="finish",
+                args="--- a/file.py\n+++ b/file.py\n@@ -1 +1 @@\n-old\n+attempt2\n",
+            ),
+        ]
+    )
+    seen_histories: list[str] = []
+    finish_attempts = 0
+
+    def fake_get_next_tool_request(_context: AgentConfig, history: Memory) -> ToolRequest:
+        seen_histories.append(history.to_text())
+        return next(responses)
+
+    def fake_apply_finish(_context: AgentConfig, tool_request: ToolRequest) -> FinishResult:
+        nonlocal finish_attempts
+        finish_attempts += 1
+        if finish_attempts == 1:
+            raise ValueError("Patch validation failed for src/pricing.py")
+        return FinishResult(
+            status="applied",
+            request=tool_request,
+            tools_called=["apply_patch", "run_tests"],
+        )
+
+    monkeypatch.setattr("ark.agentic_loop.get_next_tool_request", fake_get_next_tool_request)
+    monkeypatch.setattr("ark.agentic_loop.apply_finish", fake_apply_finish)
+
+    result = agentic_loop(context)
+    captured = capsys.readouterr()
+
+    assert result.status == "success"
+    assert result.output is not None
+    assert result.output.endswith("+attempt2\n")
+    assert "[1] finish" in captured.out
+    assert "[2] finish" in captured.out
+    assert summarize_patch_failure(ValueError("Patch validation failed for src/pricing.py")) in seen_histories[1]
 
 
 def test_summarize_test_failure_output_extracts_failed_cases() -> None:

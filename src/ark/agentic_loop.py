@@ -25,6 +25,9 @@ INVALID_FINISH_MESSAGE = (
     "Finish output must contain only a unified diff patch. "
     "Do not end the run yet; inspect any remaining files you need and then return the patch."
 )
+PATCH_FAILURE_MESSAGE_PREFIX = (
+    "Patch validation failed. Use the error below to produce a corrected patch.\n\n"
+)
 MAX_ITERATIONS = 15
 
 
@@ -175,6 +178,10 @@ def handle_post_apply_test_failure(
     )
 
 
+def summarize_patch_failure(error: Exception) -> str:
+    return PATCH_FAILURE_MESSAGE_PREFIX + str(error)
+
+
 def handle_finish(
     config: AgentConfig,
     memory: Memory,
@@ -186,7 +193,13 @@ def handle_finish(
         memory.append(iteration, tool_request, INVALID_FINISH_MESSAGE)
         return None
 
-    finish_result = apply_finish(config, tool_request)
+    try:
+        finish_result = apply_finish(config, tool_request)
+    except ValueError as exc:
+        print_iteration_action(iteration, tool_request)
+        memory.append(iteration, tool_request, summarize_patch_failure(exc))
+        return None
+
     finish_tools_called = finish_result.tools_called or []
     if finish_result.status == "post_apply_tests_failed":
         handle_post_apply_test_failure(
