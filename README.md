@@ -123,12 +123,14 @@ python -m pytest -q
 ```
 
 Ark itself uses a fixed test command based on `python -m pytest -q -p no:cacheprovider` and does not allow arbitrary shell commands for testing.
+When Ark prepares `ark-workspace`, it currently excludes `evaluation/`, so post-apply validation runs only against the copied workspace files that remain available there, typically `tests/`.
 
 ## Runtime Workspace
 
 For each run, Ark copies the selected workspace into a fixed internal directory named `ark-workspace`.
 The original workspace is preserved.
 All reads, test runs, patch validation, and patch application happen only inside `ark-workspace`.
+During this copy, Ark currently skips directories such as `evaluation/`, so the runtime workspace is intentionally narrower than the original source workspace when hidden or external evaluation assets are present.
 
 This gives Ark a predictable temporary working area with a stable path across runs.
 Before the next run, Ark deletes the previous `ark-workspace` and recreates it from the new source workspace.
@@ -300,6 +302,13 @@ It uses short section headers such as:
 - `[repair_attempt]`
 - `[command]`
 - `[finish]`
+- `[run_summary]`
+
+The final `[run_summary]` block records:
+
+- `total_tokens`: cumulative token usage reported across model calls, when available
+- `elapsed_seconds`: total wall-clock time for the run
+- `tools_called`: the ordered list of tool names used during the run, including internal steps such as `apply_patch` and post-apply `run_tests`
 
 ## Security and Limits
 
