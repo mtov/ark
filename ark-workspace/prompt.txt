@@ -1,5 +1,0 @@
-The subtotal calculation is duplicated in orders.py and reports.py.
-
-Extract this logic into a shared function named calculate_subtotal in
-pricing.py. Update both modules to use the new function while preserving all
-existing behavior.
