@@ -1,16 +1,13 @@
---- a/src/dates.py
-+++ b/src/dates.py
-@@ -1,10 +1,12 @@
- from datetime import date, timedelta
+--- a/src/products.py
++++ b/src/products.py
+@@ -1,9 +1,9 @@
+ def count_pages(products, page_size):
+     if page_size <= 0:
+         raise ValueError("page_size must be positive")
+-    return len(products) // page_size + 1
++    return (len(products) + page_size - 1) // page_size
  
- def days_between(start: str, end: str):
-     current = date.fromisoformat(start)
-     stop = date.fromisoformat(end)
-+    if stop < current:
-+        return []
-     result = []
--    while current < stop:
-+    while current <= stop:
-         result.append(current.isoformat())
-         current += timedelta(days=1)
-     return result
+ 
+ def paginate_products(products, page, page_size):
+     if page <= 0:
+         raise ValueError("page must be positive")

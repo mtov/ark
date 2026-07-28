@@ -55,3 +55,21 @@ def test_trace_finish_event_records_stage_and_detail(monkeypatch, tmp_path: Path
     assert "status: failed" in content
     assert "stage: patch_validation" in content
     assert "detail: corrupt patch" in content
+
+
+def test_trace_run_summary_records_total_tokens_and_elapsed_time(monkeypatch, tmp_path: Path) -> None:
+    log_path = tmp_path / "agent_trace.log"
+    monkeypatch.setattr(traces, "LOG_PATH", log_path)
+
+    traces.clear_trace()
+    traces.trace_response(
+        "response",
+        token_usage=TokenUsage(input_tokens=2, output_tokens=3, total_tokens=5),
+    )
+    traces.trace_run_summary(12.345)
+
+    content = log_path.read_text(encoding="utf-8")
+
+    assert "[run_summary]" in content
+    assert "total_tokens: 5" in content
+    assert "elapsed_seconds: 12.35" in content

@@ -1,12 +1,9 @@
 {
-  "id": "bugfix_001_date_range",
-  "title": "Fix inclusive date range",
-  "category": "bugfix",
-  "difficulty": "medium",
-  "language": "python",
-  "test_command": "python -m pytest -q",
-  "dependencies": [
-    "pytest"
-  ],
-  "notes": "Synthetic, self-contained task inspired by common real-world maintenance patterns."
+  "id": "bugfix-01",
+  "title": "Catalog pagination",
+  "category": "bug_fix",
+  "complexity": "low-medium",
+  "language": "Python",
+  "public_test_command": "pytest -q tests",
+  "evaluation_command": "pytest -q tests evaluation"
 }

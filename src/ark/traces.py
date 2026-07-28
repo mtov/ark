@@ -80,3 +80,12 @@ def trace_finish_event(status: str, stage: str, detail: str | None = None) -> No
     if detail:
         trace += f"detail: {detail}\n"
     _append_trace(f"{trace}\n")
+
+
+def trace_run_summary(elapsed_seconds: float) -> None:
+    trace = (
+        "[run_summary]\n"
+        f"total_tokens: {get_total_tokens()}\n"
+        f"elapsed_seconds: {elapsed_seconds:.2f}\n"
+    )
+    _append_trace(f"{trace}\n")

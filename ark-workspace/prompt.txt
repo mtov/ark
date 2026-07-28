@@ -1,8 +1,7 @@
-Users reported that date-based exports are missing the last day of the selected range.
+Catalog pagination reports an extra page when the number of products is an
+exact multiple of the page size.
 
-For example, when someone asks for data from `2024-01-10` to `2024-01-12`, they expect the result to include all three dates, not stop one day early.
+For example, a catalog with 20 products and a page size of 10 should contain
+two pages, but the current implementation reports three.
 
-Expected behavior:
-- the range should include both the start date and the end date;
-- dates should stay in `YYYY-MM-DD` format;
-- if the end date is before the start date, the result should be empty.
+Fix the pagination behavior without changing the public function signatures.

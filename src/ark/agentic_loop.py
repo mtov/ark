@@ -16,7 +16,7 @@ from .models import call_model
 from .protocol import ToolRequest, looks_like_patch, parse_response, repair_response
 from .test_failures import summarize_test_failure_output
 from .tools import run_tool
-from .traces import trace_validation_error
+from .traces import trace_run_summary, trace_validation_error
 
 MAX_HISTORY_ENTRIES = 4
 MAX_OBSERVATION_CHARS = 1200
@@ -220,18 +220,24 @@ def main() -> int:
         config = prepare_run(args.workspace_path)
         loop_result = agentic_loop(config)
     except Exception as exc:  # noqa: BLE001
+        elapsed_seconds = perf_counter() - start_time
+        trace_run_summary(elapsed_seconds)
         print_total_tokens()
-        print_elapsed_time(perf_counter() - start_time)
+        print_elapsed_time(elapsed_seconds)
         print(format_failure_message(exc))
         return 1
 
+    elapsed_seconds = perf_counter() - start_time
+
     if loop_result.status != "success":
+        trace_run_summary(elapsed_seconds)
         print_total_tokens()
-        print_elapsed_time(perf_counter() - start_time)
+        print_elapsed_time(elapsed_seconds)
         print(format_failure_message(ValueError(loop_result.error or "Unknown error.")))
         return 1
 
+    trace_run_summary(elapsed_seconds)
     print_total_tokens()
-    print_elapsed_time(perf_counter() - start_time)
+    print_elapsed_time(elapsed_seconds)
     print_final_result(loop_result.output or "", loop_result)
     return 0
