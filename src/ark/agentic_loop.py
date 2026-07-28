@@ -34,6 +34,7 @@ class LoopResult:
     output: str | None = None
     error: str | None = None
     post_apply_tests_passed: bool = False
+    tools_called: list[str] = field(default_factory=list)
 
     @classmethod
     def success(
@@ -41,22 +42,31 @@ class LoopResult:
         output: str,
         *,
         post_apply_tests_passed: bool = False,
+        tools_called: list[str] | None = None,
     ) -> LoopResult:
         return cls(
             status="success",
             output=output,
             post_apply_tests_passed=post_apply_tests_passed,
+            tools_called=tools_called or [],
         )
 
     @classmethod
-    def error(cls, message: str, *, status: str = "error") -> LoopResult:
-        return cls(status=status, error=message)
+    def error(
+        cls,
+        message: str,
+        *,
+        status: str = "error",
+        tools_called: list[str] | None = None,
+    ) -> LoopResult:
+        return cls(status=status, error=message, tools_called=tools_called or [])
 
     @classmethod
-    def max_iterations_reached(cls) -> LoopResult:
+    def max_iterations_reached(cls, *, tools_called: list[str] | None = None) -> LoopResult:
         return cls(
             status="max_iterations_reached",
             error=MAX_ITERATIONS_REACHED_MESSAGE,
+            tools_called=tools_called or [],
         )
 
 
@@ -194,22 +204,28 @@ def handle_finish(
 
 def agentic_loop(config: AgentConfig) -> LoopResult:
     memory = Memory()
+    tools_called: list[str] = []
 
     for iteration in range(1, MAX_ITERATIONS + 1):
         tool_request = get_next_tool_request(config, memory)
+        tools_called.append(tool_request.name)
 
         if tool_request.name == "finish":
             output = handle_finish(config, memory, iteration, tool_request)
             if output is None:
                 continue
-            return LoopResult.success(output, post_apply_tests_passed=True)
+            return LoopResult.success(
+                output,
+                post_apply_tests_passed=True,
+                tools_called=tools_called,
+            )
 
         print_iteration_action(iteration, tool_request)
 
         result = run_tool(tool_request, config)
         memory.append(iteration, tool_request, result)
 
-    return LoopResult.max_iterations_reached()
+    return LoopResult.max_iterations_reached(tools_called=tools_called)
 
 
 def main() -> int:
@@ -221,7 +237,7 @@ def main() -> int:
         loop_result = agentic_loop(config)
     except Exception as exc:  # noqa: BLE001
         elapsed_seconds = perf_counter() - start_time
-        trace_run_summary(elapsed_seconds)
+        trace_run_summary(elapsed_seconds, [])
         print_total_tokens()
         print_elapsed_time(elapsed_seconds)
         print(format_failure_message(exc))
@@ -230,13 +246,13 @@ def main() -> int:
     elapsed_seconds = perf_counter() - start_time
 
     if loop_result.status != "success":
-        trace_run_summary(elapsed_seconds)
+        trace_run_summary(elapsed_seconds, loop_result.tools_called)
         print_total_tokens()
         print_elapsed_time(elapsed_seconds)
         print(format_failure_message(ValueError(loop_result.error or "Unknown error.")))
         return 1
 
-    trace_run_summary(elapsed_seconds)
+    trace_run_summary(elapsed_seconds, loop_result.tools_called)
     print_total_tokens()
     print_elapsed_time(elapsed_seconds)
     print_final_result(loop_result.output or "", loop_result)
