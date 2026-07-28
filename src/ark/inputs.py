@@ -15,6 +15,7 @@ CONFIG_DIR = PROJECT_ROOT / "config"
 CONFIG_PATH = CONFIG_DIR / "config.json"
 SYSTEM_PROMPT_PATH = CONFIG_DIR / "system_prompt.txt"
 WORKSPACE_INSTRUCTIONS_PATH = "AGENTS.md"
+IGNORED_WORKSPACE_NAMES = ("evaluation",)
 
 
 @dataclass
@@ -110,7 +111,11 @@ def prepare_runtime_workspace(source_workspace_path: Path) -> Path:
     if RUNTIME_WORKSPACE_PATH.exists():
         shutil.rmtree(RUNTIME_WORKSPACE_PATH)
 
-    shutil.copytree(source_workspace_path, RUNTIME_WORKSPACE_PATH)
+    shutil.copytree(
+        source_workspace_path,
+        RUNTIME_WORKSPACE_PATH,
+        ignore=shutil.ignore_patterns(*IGNORED_WORKSPACE_NAMES),
+    )
     return RUNTIME_WORKSPACE_PATH
 
 

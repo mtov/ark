@@ -29,6 +29,24 @@ def test_prepare_runtime_workspace_recreates_fixed_directory(tmp_path: Path, mon
     assert (runtime_workspace / "prompt.txt").read_text(encoding="utf-8") == "second prompt"
 
 
+def test_prepare_runtime_workspace_ignores_evaluation_directory(tmp_path: Path, monkeypatch) -> None:
+    source_workspace = tmp_path / "source"
+    source_workspace.mkdir()
+    (source_workspace / "prompt.txt").write_text("prompt", encoding="utf-8")
+    evaluation_dir = source_workspace / "evaluation"
+    evaluation_dir.mkdir()
+    (evaluation_dir / "results.json").write_text('{"score": 1.0}', encoding="utf-8")
+
+    runtime_workspace = tmp_path / "ark-workspace"
+    monkeypatch.setattr(inputs, "RUNTIME_WORKSPACE_PATH", runtime_workspace)
+
+    prepared_workspace = inputs.prepare_runtime_workspace(source_workspace)
+
+    assert prepared_workspace == runtime_workspace
+    assert (runtime_workspace / "prompt.txt").exists()
+    assert not (runtime_workspace / "evaluation").exists()
+
+
 def test_build_user_prompt_appends_workspace_instructions() -> None:
     result = inputs.build_user_prompt(
         "Fix the bug.",

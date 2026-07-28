@@ -1,0 +1,12 @@
+{
+  "id": "bugfix_001_date_range",
+  "title": "Fix inclusive date range",
+  "category": "bugfix",
+  "difficulty": "medium",
+  "language": "python",
+  "test_command": "python -m pytest -q",
+  "dependencies": [
+    "pytest"
+  ],
+  "notes": "Synthetic, self-contained task inspired by common real-world maintenance patterns."
+}
