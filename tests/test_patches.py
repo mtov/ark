@@ -318,3 +318,36 @@ def test_run_mutating_command_prints_preview_when_provided(capsys, tmp_path: Pat
     captured = capsys.readouterr()
     assert "Command preview:" in captured.out
     assert "--- a/file.py" in captured.out
+
+
+def test_validate_and_repair_patch_reports_original_block_when_rebuild_fails(tmp_path: Path) -> None:
+    file_path = tmp_path / "src"
+    file_path.mkdir()
+    pricing_path = file_path / "pricing.py"
+    pricing_path.write_text(
+        'from decimal import Decimal\n\n\ndef calculate_discount(subtotal):\n    if subtotal >= Decimal("100.00"):\n        return subtotal * Decimal("0.10")\n    return Decimal("0.00")\n',
+        encoding="utf-8",
+    )
+    patch_text = """--- a/src/pricing.py
++++ b/src/pricing.py
+@@ -1,6 +1,10 @@
+ from decimal import Decimal
+ 
+ 
++def calculate_subtotal(items):
++    return sum((item["unit_price"] * item["quantity"] for item in items), start=0)
++
++
+ def calculate_discount(subtotal):
+     if subtotal >= Decimal("100.00"):
+         return subtotal * Decimal("0.10")
+         return Decimal("0.00")
+"""
+
+    with pytest.raises(ValueError, match="Failed to match the original block") as exc_info:
+        validate_and_repair_patch(tmp_path, patch_text)
+
+    message = str(exc_info.value)
+    assert "src/pricing.py" in message
+    assert 'if subtotal >= Decimal("100.00"):' in message
+    assert 'return Decimal("0.00")' in message

@@ -1,7 +1,5 @@
-Catalog pagination reports an extra page when the number of products is an
-exact multiple of the page size.
+The subtotal calculation is duplicated in orders.py and reports.py.
 
-For example, a catalog with 20 products and a page size of 10 should contain
-two pages, but the current implementation reports three.
-
-Fix the pagination behavior without changing the public function signatures.
+Extract this logic into a shared function named calculate_subtotal in
+pricing.py. Update both modules to use the new function while preserving all
+existing behavior.

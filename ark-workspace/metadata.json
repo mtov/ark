@@ -1,8 +1,8 @@
 {
-  "id": "bugfix-01",
-  "title": "Catalog pagination",
-  "category": "bug_fix",
-  "complexity": "low-medium",
+  "id": "refactor-01",
+  "title": "Extract subtotal calculation",
+  "category": "refactoring",
+  "complexity": "medium",
   "language": "Python",
   "public_test_command": "pytest -q tests",
   "evaluation_command": "pytest -q tests evaluation"

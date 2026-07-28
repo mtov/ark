@@ -180,6 +180,14 @@ def _extract_hunks(body_lines: list[str]) -> list[list[str]]:
     return hunks
 
 
+def _summarize_block(lines: list[str], *, max_lines: int = 6) -> str:
+    preview = [line.rstrip("\n") for line in lines[:max_lines]]
+    if len(lines) > max_lines:
+        preview.append("...")
+        preview.append(lines[-1].rstrip("\n"))
+    return "\n".join(preview)
+
+
 def _rebuild_file_patch(workspace_path: Path, old_path: str, new_path: str, body_lines: list[str]) -> str:
     target_path = workspace_path / _strip_diff_prefix(old_path)
     original_text = target_path.read_text(encoding="utf-8")
@@ -204,7 +212,10 @@ def _rebuild_file_patch(workspace_path: Path, old_path: str, new_path: str, body
                 new_block.append(payload)
 
         if not old_block:
-            raise ValueError(f"Could not rebuild patch for {_strip_diff_prefix(old_path)}.")
+            raise ValueError(
+                f"Could not rebuild patch for {_strip_diff_prefix(old_path)}. "
+                "The patch hunk does not contain any original lines to match."
+            )
 
         match_index = None
         max_index = len(rebuilt_lines) - len(old_block) + 1
@@ -214,7 +225,12 @@ def _rebuild_file_patch(workspace_path: Path, old_path: str, new_path: str, body
                 break
 
         if match_index is None:
-            raise ValueError(f"Could not rebuild patch for {_strip_diff_prefix(old_path)}.")
+            old_block_preview = _summarize_block(old_block)
+            raise ValueError(
+                f"Could not rebuild patch for {_strip_diff_prefix(old_path)}. "
+                "Failed to match the original block against the current file:\n"
+                f"{old_block_preview}"
+            )
 
         rebuilt_lines[match_index : match_index + len(old_block)] = new_block
         search_start = match_index + len(new_block)
