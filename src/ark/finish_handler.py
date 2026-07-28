@@ -16,6 +16,7 @@ class FinishResult:
     status: str
     request: ToolRequest
     test_output: str | None = None
+    tools_called: list[str] | None = None
 
 
 def _trace_and_raise(stage: str, exc: Exception) -> None:
@@ -61,7 +62,12 @@ def apply_finish(
             status="post_apply_tests_failed",
             request=tool_request,
             test_output=test_output,
+            tools_called=["apply_patch", "run_tests"],
         )
 
     trace_finish_event("completed", "finish")
-    return FinishResult(status="applied", request=tool_request)
+    return FinishResult(
+        status="applied",
+        request=tool_request,
+        tools_called=["apply_patch", "run_tests"],
+    )

@@ -66,11 +66,11 @@ def test_trace_run_summary_records_total_tokens_and_elapsed_time(monkeypatch, tm
         "response",
         token_usage=TokenUsage(input_tokens=2, output_tokens=3, total_tokens=5),
     )
-    traces.trace_run_summary(12.345, ["list_files", "read_file", "finish"])
+    traces.trace_run_summary(12.345, ["list_files", "read_file", "finish", "apply_patch", "run_tests"])
 
     content = log_path.read_text(encoding="utf-8")
 
     assert "[run_summary]" in content
     assert "total_tokens: 5" in content
     assert "elapsed_seconds: 12.35" in content
-    assert "tools_called: list_files, read_file, finish" in content
+    assert "tools_called: list_files, read_file, finish, apply_patch, run_tests" in content

@@ -154,7 +154,11 @@ def test_agentic_loop_retries_after_invalid_finish(monkeypatch, capsys) -> None:
     monkeypatch.setattr("ark.agentic_loop.get_next_tool_request", fake_get_next_tool_request)
     monkeypatch.setattr(
         "ark.agentic_loop.apply_finish",
-        lambda _context, tool_request: FinishResult(status="applied", request=tool_request),
+        lambda _context, tool_request: FinishResult(
+            status="applied",
+            request=tool_request,
+            tools_called=["apply_patch", "run_tests"],
+        ),
     )
 
     result = agentic_loop(context)
@@ -201,8 +205,13 @@ def test_agentic_loop_retries_after_post_apply_test_failure(monkeypatch, capsys)
                 status="post_apply_tests_failed",
                 request=tool_request,
                 test_output="..F\nassert 1 == 2",
+                tools_called=["apply_patch", "run_tests"],
             )
-        return FinishResult(status="applied", request=tool_request)
+        return FinishResult(
+            status="applied",
+            request=tool_request,
+            tools_called=["apply_patch", "run_tests"],
+        )
 
     def fake_reset_runtime_workspace(runtime_context: AgentConfig) -> None:
         reset_calls.append(runtime_context.source_workspace_path)
@@ -275,3 +284,28 @@ def test_agentic_loop_returns_error_result_when_max_iterations_reached(monkeypat
     assert result.status == "max_iterations_reached"
     assert result.output is None
     assert result.error == MAX_ITERATIONS_REACHED_MESSAGE
+
+
+def test_agentic_loop_records_finish_internal_tools_in_tools_called(monkeypatch) -> None:
+    context = build_context()
+
+    monkeypatch.setattr(
+        "ark.agentic_loop.get_next_tool_request",
+        lambda _context, _history: ToolRequest(
+            thought="done",
+            name="finish",
+            args="--- a/file.py\n+++ b/file.py\n@@ -1 +1 @@\n-old\n+new\n",
+        ),
+    )
+    monkeypatch.setattr(
+        "ark.agentic_loop.apply_finish",
+        lambda _context, tool_request: FinishResult(
+            status="applied",
+            request=tool_request,
+            tools_called=["apply_patch", "run_tests"],
+        ),
+    )
+
+    result = agentic_loop(context)
+
+    assert result.tools_called == ["finish", "apply_patch", "run_tests"]

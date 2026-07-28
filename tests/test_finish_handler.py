@@ -44,6 +44,7 @@ def test_handle_finish_runs_post_apply_tests_for_bug_fix(monkeypatch, tmp_path: 
 
     assert result.status == "applied"
     assert result.request is tool_request
+    assert result.tools_called == ["apply_patch", "run_tests"]
     assert calls == ["save_patch", "apply_patch"]
 
 
@@ -71,6 +72,7 @@ def test_handle_finish_runs_post_apply_tests_for_feature_task(monkeypatch, tmp_p
 
     assert result.status == "applied"
     assert result.request is tool_request
+    assert result.tools_called == ["apply_patch", "run_tests"]
     assert run_tests_called is True
 
 
@@ -101,6 +103,7 @@ def test_handle_finish_runs_post_apply_tests_for_bugfix_without_keywords(monkeyp
 
     assert result.status == "applied"
     assert result.request is tool_request
+    assert result.tools_called == ["apply_patch", "run_tests"]
     assert run_tests_called is True
 
 
@@ -124,6 +127,7 @@ def test_handle_finish_raises_when_post_apply_tests_fail(monkeypatch, tmp_path: 
     assert result.status == "post_apply_tests_failed"
     assert result.request is tool_request
     assert result.test_output == "1 failed"
+    assert result.tools_called == ["apply_patch", "run_tests"]
     assert finish_events == [("failed", "post_apply_tests", "1 failed")]
 
 
@@ -151,6 +155,7 @@ def test_handle_finish_runs_post_apply_tests_for_readme_patch(monkeypatch, tmp_p
 
     assert result.status == "applied"
     assert result.request is tool_request
+    assert result.tools_called == ["apply_patch", "run_tests"]
     assert run_tests_called is True
 
 
@@ -191,6 +196,7 @@ def test_handle_finish_repairs_patch_when_request_args_looks_like_patch(monkeypa
 
     assert result.status == "applied"
     assert result.request is tool_request
+    assert result.tools_called == ["apply_patch", "run_tests"]
     assert tool_request.args == repaired_patch
     assert saved_patches == [repaired_patch]
 
@@ -217,6 +223,7 @@ def test_handle_finish_rejects_mixed_output_when_tests_failed(monkeypatch, tmp_p
 
     assert result.status == "post_apply_tests_failed"
     assert result.test_output == "1 failed, 5 passed"
+    assert result.tools_called == ["apply_patch", "run_tests"]
     assert finish_events == [("failed", "post_apply_tests", "1 failed, 5 passed")]
 
 

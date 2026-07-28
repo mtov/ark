@@ -180,13 +180,14 @@ def handle_finish(
     memory: Memory,
     iteration: int,
     tool_request: ToolRequest,
-) -> str | None:
+) -> tuple[str, list[str]] | None:
     if not looks_like_patch(tool_request.args):
         print_iteration_action(iteration, tool_request)
         memory.append(iteration, tool_request, INVALID_FINISH_MESSAGE)
         return None
 
     finish_result = apply_finish(config, tool_request)
+    finish_tools_called = finish_result.tools_called or []
     if finish_result.status == "post_apply_tests_failed":
         handle_post_apply_test_failure(
             config,
@@ -199,7 +200,7 @@ def handle_finish(
 
     tool_request = finish_result.request
     print_iteration_action(iteration, tool_request)
-    return tool_request.args
+    return tool_request.args, finish_tools_called
 
 
 def agentic_loop(config: AgentConfig) -> LoopResult:
@@ -211,13 +212,14 @@ def agentic_loop(config: AgentConfig) -> LoopResult:
         tools_called.append(tool_request.name)
 
         if tool_request.name == "finish":
-            output = handle_finish(config, memory, iteration, tool_request)
-            if output is None:
+            finish_output = handle_finish(config, memory, iteration, tool_request)
+            if finish_output is None:
                 continue
+            output, finish_tools_called = finish_output
             return LoopResult.success(
                 output,
                 post_apply_tests_passed=True,
-                tools_called=tools_called,
+                tools_called=tools_called + finish_tools_called,
             )
 
         print_iteration_action(iteration, tool_request)
