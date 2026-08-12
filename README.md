@@ -7,6 +7,8 @@
 Ark is a didactic Python project for studying how to build a small code agent.
 It is an ongoing research project developed by [ASERG](https://aserg.labsoft.dcc.ufmg.br/) at DCC/UFMG.
 
+For more information, check our [paper](https://arxiv.org/abs/2608.10934).
+
 ## Overview
 
 Ark is intentionally small.
