@@ -2,8 +2,10 @@ from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass
+import json
 import os
 from typing import TYPE_CHECKING
+from urllib import error, request
 
 from .traces import trace_response
 
@@ -18,6 +20,8 @@ class ModelConfig:
     openai_base_url: str | None
     openai_model: str | None
     openai_api_key_env: str | None
+    ollama_base_url: str | None = None
+    ollama_model: str | None = None
 
 
 @dataclass
@@ -120,6 +124,10 @@ def resolve_openai_api_key(config: AgentConfig) -> str:
     return os.environ.get("OPENAI_API_KEY", "ark")
 
 
+def resolve_ollama_base_url(config: AgentConfig) -> str:
+    return config.model_config.ollama_base_url or "http://localhost:11434"
+
+
 def call_openai_compatible(config: AgentConfig, user_prompt: str) -> ModelResponse:
     try:
         from openai import OpenAI
@@ -163,6 +171,94 @@ def call_openai_compatible(config: AgentConfig, user_prompt: str) -> ModelRespon
     )
 
 
+def extract_ollama_content(response: object) -> str:
+    if not isinstance(response, dict):
+        raise ValueError("Ollama returned a non-JSON response.")
+
+    content = response.get("response")
+    if isinstance(content, str) and content.strip():
+        return content.strip()
+
+    message = response.get("message")
+    if isinstance(message, dict):
+        message_content = message.get("content")
+        if isinstance(message_content, str) and message_content.strip():
+            return message_content.strip()
+
+    raise ValueError("Ollama returned a response without message content.")
+
+
+def extract_ollama_usage(response: object) -> TokenUsage:
+    if not isinstance(response, dict):
+        return TokenUsage()
+
+    input_tokens = response.get("prompt_eval_count")
+    output_tokens = response.get("eval_count")
+    total_tokens = None
+    if input_tokens is not None or output_tokens is not None:
+        total_tokens = (input_tokens or 0) + (output_tokens or 0)
+
+    return TokenUsage(
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        total_tokens=total_tokens,
+    )
+
+
+def call_ollama(config: AgentConfig, user_prompt: str) -> ModelResponse:
+    ollama_model = require_config_value(
+        config.model_config.ollama_model,
+        "ollama_model",
+        "Ollama",
+    )
+    base_url = resolve_ollama_base_url(config).rstrip("/")
+    payload = json.dumps(
+        {
+            "model": ollama_model,
+            "system": config.system_prompt,
+            "prompt": user_prompt,
+            "stream": False,
+        }
+    ).encode("utf-8")
+    req = request.Request(
+        f"{base_url}/api/generate",
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    try:
+        with request.urlopen(req, timeout=config.model_config.timeout_seconds) as response:
+            body = response.read().decode("utf-8")
+    except error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace").strip()
+        raise RuntimeError(
+            f"Ollama request failed for {base_url}: HTTP {exc.code}: {detail or exc.reason}"
+        ) from exc
+    except error.URLError as exc:
+        raise RuntimeError(
+            f"Ollama request failed for {base_url}: {exc.__class__.__name__}: {exc.reason}"
+        ) from exc
+    except TimeoutError as exc:
+        raise RuntimeError(
+            f"Ollama request timed out after {config.model_config.timeout_seconds} seconds."
+        ) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(
+            f"Ollama request failed for {base_url}: {exc.__class__.__name__}: {exc}"
+        ) from exc
+
+    try:
+        parsed = json.loads(body)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"Ollama returned invalid JSON: {exc}") from exc
+
+    return build_model_response(
+        extract_ollama_content(parsed),
+        extract_ollama_usage(parsed),
+    )
+
+
 def call_model(
     config: AgentConfig,
     user_prompt: str,
@@ -172,6 +268,8 @@ def call_model(
 
     if model == "openai-compatible":
         response = call_openai_compatible(config, user_prompt)
+    elif model == "ollama":
+        response = call_ollama(config, user_prompt)
     else:
         raise ValueError(f"Unsupported model: {model}")
 

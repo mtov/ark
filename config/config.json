@@ -1,7 +1,6 @@
 {
-  "model": "openai-compatible",
-  "openai_base_url": null,
-  "openai_model": "gpt-5.4-mini",
-  "timeout_seconds": 600,
-  "openai_api_key_env": "OPENAI_API_KEY"
+  "model": "ollama",
+  "ollama_base_url": "http://localhost:11434",
+  "ollama_model": "qwen2.5-coder:14b",
+  "timeout_seconds": 600
 }

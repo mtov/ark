@@ -48,6 +48,7 @@ python run_ark.py ./test_workspace/bugfix_001_date_range
 
 The default configuration calls the OpenAI API directly.
 If you want another OpenAI-compatible provider, set `openai_base_url` in `config/config.json`.
+If you want to use a local Ollama model, switch `model` to `ollama` and set `ollama_model`.
 
 What you should expect during a run:
 
@@ -78,8 +79,21 @@ Notes:
 - with `openai_base_url: null`, Ark calls the default OpenAI API directly
 - the documented setup requires `OPENAI_API_KEY`
 - `openai_model` selects the concrete model used through the OpenAI-compatible path
+- with `model: "ollama"`, Ark calls the local Ollama HTTP API, using `http://localhost:11434` by default
+- `ollama_model` selects the installed local model, such as `qwen2.5-coder:14b`
 - `timeout_seconds` applies to the model request
 - `pytest` must be available in the same Python environment used to run Ark
+
+Example Ollama configuration:
+
+```json
+{
+  "model": "ollama",
+  "ollama_base_url": "http://localhost:11434",
+  "ollama_model": "qwen2.5-coder:14b",
+  "timeout_seconds": 600
+}
+```
 
 ## Workspace Contract
 

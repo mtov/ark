@@ -60,6 +60,30 @@ def test_build_user_prompt_appends_workspace_instructions() -> None:
     )
 
 
+def test_load_model_config_supports_ollama(tmp_path: Path, monkeypatch) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(
+        json.dumps(
+            {
+                "model": "ollama",
+                "ollama_base_url": "http://localhost:11434",
+                "ollama_model": "qwen2.5-coder:14b",
+                "timeout_seconds": 45,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr(inputs, "CONFIG_PATH", config_path)
+
+    model_config = inputs.load_model_config()
+
+    assert model_config.model == "ollama"
+    assert model_config.ollama_base_url == "http://localhost:11434"
+    assert model_config.ollama_model == "qwen2.5-coder:14b"
+    assert model_config.timeout_seconds == 45
+
+
 def test_prepare_run_keeps_agents_md_out_of_system_prompt(tmp_path: Path, monkeypatch) -> None:
     source_workspace = tmp_path / "source"
     source_workspace.mkdir()
