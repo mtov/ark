@@ -284,11 +284,12 @@ def agentic_loop(config: AgentConfig) -> LoopResult:
                 tools_called=tools_called + finish_tools_called,
             )
 
-        print_iteration_action(iteration, tool_request)
-
         result = maybe_short_circuit_redundant_tool_request(memory, tool_request)
         if result is None:
+            print_iteration_action(iteration, tool_request)
             result = run_tool(tool_request, config)
+        else:
+            print_iteration_action(iteration, tool_request, "skipped: redundant")
         memory.append(iteration, tool_request, result)
 
     return LoopResult.max_iterations_reached(tools_called=tools_called)

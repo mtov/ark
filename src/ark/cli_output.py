@@ -27,8 +27,9 @@ def format_iteration_action(tool_request: ToolRequest) -> str:
     return tool_request.name
 
 
-def print_iteration_action(iteration: int, tool_request: ToolRequest) -> None:
-    print(f"[{iteration}] {format_iteration_action(tool_request)}", flush=True)
+def print_iteration_action(iteration: int, tool_request: ToolRequest, note: str | None = None) -> None:
+    suffix = f" ({note})" if note else ""
+    print(f"[{iteration}] {format_iteration_action(tool_request)}{suffix}", flush=True)
 
 
 def print_total_tokens() -> None:

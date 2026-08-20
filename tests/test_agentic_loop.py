@@ -462,5 +462,5 @@ def test_agentic_loop_short_circuits_redundant_consecutive_read_file(monkeypatch
     assert result.status == "success"
     assert run_tool_calls == ["src/products.py"]
     assert "[1] read_file products.py" in captured.out
-    assert "[2] read_file products.py" in captured.out
+    assert "[2] read_file products.py (skipped: redundant)" in captured.out
     assert REDUNDANT_READ_FILE_MESSAGE in seen_histories[2]
