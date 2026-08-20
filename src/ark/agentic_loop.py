@@ -41,6 +41,10 @@ FULL_FILE_FALLBACK_MESSAGE = (
     "Repeat one FILE block per modified file."
 )
 MAX_ITERATIONS = 15
+REDUNDANT_READ_FILE_MESSAGE = (
+    "You just read this file in the previous step. Do not read it again unless the file changed "
+    "or you need to verify a specific detail before finishing."
+)
 
 
 @dataclass
@@ -228,6 +232,21 @@ def handle_finish(
     return tool_request.args, finish_tools_called
 
 
+def maybe_short_circuit_redundant_tool_request(memory: Memory, tool_request: ToolRequest) -> str | None:
+    if not memory.entries:
+        return None
+
+    previous_request = memory.entries[-1].tool_request
+    if (
+        tool_request.name == "read_file"
+        and previous_request.name == "read_file"
+        and tool_request.args.strip() == previous_request.args.strip()
+    ):
+        return REDUNDANT_READ_FILE_MESSAGE
+
+    return None
+
+
 def agentic_loop(config: AgentConfig) -> LoopResult:
     memory = Memory()
     tools_called: list[str] = []
@@ -249,7 +268,9 @@ def agentic_loop(config: AgentConfig) -> LoopResult:
 
         print_iteration_action(iteration, tool_request)
 
-        result = run_tool(tool_request, config)
+        result = maybe_short_circuit_redundant_tool_request(memory, tool_request)
+        if result is None:
+            result = run_tool(tool_request, config)
         memory.append(iteration, tool_request, result)
 
     return LoopResult.max_iterations_reached(tools_called=tools_called)

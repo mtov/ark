@@ -30,7 +30,7 @@ def list_files(action_input: str, workspace_path: Path) -> str:
     if not path.exists():
         return f"Directory not found inside the workspace: {path}"
     if not path.is_dir():
-        return f"Path is not a directory: {path}"
+        return f"Path is a file, not a directory. Use read_file instead: {path}"
 
     entries = sorted(item.name for item in path.iterdir())
     if not entries:

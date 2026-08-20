@@ -5,6 +5,7 @@ from pathlib import Path
 from ark.agentic_loop import (
     INVALID_FINISH_MESSAGE,
     MAX_ITERATIONS_REACHED_MESSAGE,
+    REDUNDANT_READ_FILE_MESSAGE,
     LoopResult,
     Memory,
     agentic_loop,
@@ -358,3 +359,49 @@ def test_agentic_loop_records_finish_internal_tools_in_tools_called(monkeypatch)
     result = agentic_loop(context)
 
     assert result.tools_called == ["finish", "apply_patch", "run_tests"]
+
+
+def test_agentic_loop_short_circuits_redundant_consecutive_read_file(monkeypatch, capsys) -> None:
+    context = build_context()
+    responses = iter(
+        [
+            ToolRequest(thought="inspect", name="read_file", args="src/products.py"),
+            ToolRequest(thought="inspect again", name="read_file", args="src/products.py"),
+            ToolRequest(
+                thought="done",
+                name="finish",
+                args="--- a/file.py\n+++ b/file.py\n@@ -1 +1 @@\n-old\n+new\n",
+            ),
+        ]
+    )
+    seen_histories: list[str] = []
+
+    def fake_get_next_tool_request(_context: AgentConfig, history: Memory) -> ToolRequest:
+        seen_histories.append(history.to_text())
+        return next(responses)
+
+    run_tool_calls: list[str] = []
+
+    def fake_run_tool(tool_request: ToolRequest, _context: AgentConfig) -> str:
+        run_tool_calls.append(tool_request.args)
+        return "file contents"
+
+    monkeypatch.setattr("ark.agentic_loop.get_next_tool_request", fake_get_next_tool_request)
+    monkeypatch.setattr("ark.agentic_loop.run_tool", fake_run_tool)
+    monkeypatch.setattr(
+        "ark.agentic_loop.apply_finish",
+        lambda _context, tool_request: FinishResult(
+            status="applied",
+            request=tool_request,
+            tools_called=["apply_patch", "run_tests"],
+        ),
+    )
+
+    result = agentic_loop(context)
+    captured = capsys.readouterr()
+
+    assert result.status == "success"
+    assert run_tool_calls == ["src/products.py"]
+    assert "[1] read_file products.py" in captured.out
+    assert "[2] read_file products.py" in captured.out
+    assert REDUNDANT_READ_FILE_MESSAGE in seen_histories[2]
