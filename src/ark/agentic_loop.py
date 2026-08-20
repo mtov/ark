@@ -13,6 +13,7 @@ from .cli_output import (
 from .finish_handler import apply_finish
 from .inputs import AgentConfig, parse_args, prepare_run, reset_runtime_workspace
 from .models import call_model
+from .patches import looks_like_full_file_response
 from .protocol import ToolRequest, looks_like_patch, parse_response, repair_response
 from .test_failures import summarize_test_failure_output
 from .tools import run_tool
@@ -23,10 +24,21 @@ MAX_OBSERVATION_CHARS = 1200
 MAX_ITERATIONS_REACHED_MESSAGE = "Agent stopped after reaching the maximum number of steps."
 INVALID_FINISH_MESSAGE = (
     "Finish output must contain only a unified diff patch. "
+    "If patch validation keeps failing, you may instead return one or more complete files using "
+    "FILE: path followed by triple-backtick content blocks. "
     "Do not end the run yet; inspect any remaining files you need and then return the patch."
 )
 PATCH_FAILURE_MESSAGE_PREFIX = (
     "Patch validation failed. Use the error below to produce a corrected patch.\n\n"
+)
+FULL_FILE_FALLBACK_MESSAGE = (
+    "\n\nIf the patch keeps failing, you may instead return complete file contents in this format:\n\n"
+    "FILE: src/example.py\n"
+    "```python\n"
+    "def example():\n"
+    "    return 1\n"
+    "```\n\n"
+    "Repeat one FILE block per modified file."
 )
 MAX_ITERATIONS = 15
 
@@ -179,7 +191,7 @@ def handle_post_apply_test_failure(
 
 
 def summarize_patch_failure(error: Exception) -> str:
-    return PATCH_FAILURE_MESSAGE_PREFIX + str(error)
+    return PATCH_FAILURE_MESSAGE_PREFIX + str(error) + FULL_FILE_FALLBACK_MESSAGE
 
 
 def handle_finish(
@@ -188,7 +200,7 @@ def handle_finish(
     iteration: int,
     tool_request: ToolRequest,
 ) -> tuple[str, list[str]] | None:
-    if not looks_like_patch(tool_request.args):
+    if not looks_like_patch(tool_request.args) and not looks_like_full_file_response(tool_request.args):
         print_iteration_action(iteration, tool_request)
         memory.append(iteration, tool_request, INVALID_FINISH_MESSAGE)
         return None

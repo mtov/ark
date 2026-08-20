@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from ark.finish_handler import apply_finish
+from ark.finish_handler import INVALID_FINISH_PATCH_MESSAGE, apply_finish
 from ark.inputs import AgentConfig
 from ark.models import ModelConfig
 from ark.protocol import ToolRequest
@@ -201,6 +201,37 @@ def test_handle_finish_repairs_patch_when_request_args_looks_like_patch(monkeypa
     assert saved_patches == [repaired_patch]
 
 
+def test_handle_finish_builds_patch_from_full_file_response(monkeypatch, tmp_path: Path) -> None:
+    context = build_context(tmp_path, "Fix the bug in src/text_utils.py.")
+    source_path = tmp_path / "src"
+    source_path.mkdir()
+    (source_path / "text_utils.py").write_text("def slugify(value):\n    return value\n", encoding="utf-8")
+    tool_request = ToolRequest(
+        thought="done",
+        name="finish",
+        args=(
+            "FILE: src/text_utils.py\n"
+            "```python\n"
+            "def slugify(value):\n"
+            "    return value.strip().lower()\n"
+            "```\n"
+        ),
+    )
+    saved_patches: list[str] = []
+
+    monkeypatch.setattr("ark.finish_handler.save_patch", lambda _path, patch: saved_patches.append(patch))
+    monkeypatch.setattr("ark.finish_handler.apply_patch", lambda *_args: None)
+    monkeypatch.setattr("ark.finish_handler.run_tests_with_status", lambda *_args: (True, "1 passed"))
+    monkeypatch.setattr("ark.finish_handler.trace_finish_event", lambda *_args: None)
+
+    result = apply_finish(context, tool_request)
+
+    assert result.status == "applied"
+    assert result.tools_called == ["apply_patch", "run_tests"]
+    assert tool_request.args.startswith("--- a/src/text_utils.py\n+++ b/src/text_utils.py\n")
+    assert saved_patches == [tool_request.args]
+
+
 def test_handle_finish_rejects_mixed_output_when_tests_failed(monkeypatch, tmp_path: Path) -> None:
     context = build_context(tmp_path, "Implement the BUY2GET50 feature in checkout.")
     tool_request = ToolRequest(
@@ -259,9 +290,9 @@ def test_handle_finish_rejects_non_patch_finish_output(monkeypatch, tmp_path: Pa
 
     monkeypatch.setattr("ark.finish_handler.trace_finish_event", lambda *args: finish_events.append(args))
 
-    with pytest.raises(ValueError, match="Finish output must be a unified diff patch."):
+    with pytest.raises(ValueError, match="Finish output must be a unified diff patch or FILE: sections with complete file contents."):
         apply_finish(context, tool_request)
 
     assert finish_events == [
-        ("failed", "finish_validation", "Finish output must be a unified diff patch."),
+        ("failed", "finish_validation", INVALID_FINISH_PATCH_MESSAGE),
     ]

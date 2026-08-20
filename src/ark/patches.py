@@ -15,6 +15,54 @@ def save_patch(workspace_path: Path, patch_text: str) -> None:
     patch_path.write_text(patch_text, encoding="utf-8")
 
 
+def parse_full_file_response(text: str) -> list[tuple[str, str]]:
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").splitlines()
+    rewrites: list[tuple[str, str]] = []
+    index = 0
+
+    while index < len(lines):
+        header = lines[index].strip()
+        if not header.startswith("FILE:"):
+            index += 1
+            continue
+
+        raw_path = header.removeprefix("FILE:").strip()
+        if not raw_path:
+            raise ValueError("Full-file response is missing a path after FILE:.")
+
+        index += 1
+        while index < len(lines) and not lines[index].strip():
+            index += 1
+
+        if index >= len(lines) or not lines[index].strip().startswith("```"):
+            raise ValueError("Full-file response must wrap each file in triple backticks.")
+
+        index += 1
+        content_lines: list[str] = []
+        while index < len(lines) and not lines[index].strip().startswith("```"):
+            content_lines.append(lines[index])
+            index += 1
+
+        if index >= len(lines):
+            raise ValueError("Full-file response is missing a closing triple backtick fence.")
+
+        rewrites.append((raw_path, "\n".join(content_lines)))
+        index += 1
+
+    if not rewrites:
+        raise ValueError("Full-file response did not contain any FILE: sections.")
+
+    return rewrites
+
+
+def looks_like_full_file_response(text: str) -> bool:
+    try:
+        parse_full_file_response(text)
+    except ValueError:
+        return False
+    return True
+
+
 def _strip_code_fences(text: str) -> str:
     lines = text.replace("\r\n", "\n").replace("\r", "\n").splitlines()
     return "\n".join(line for line in lines if not line.strip().startswith("```")).strip()
@@ -160,6 +208,20 @@ def _strip_diff_prefix(path: str) -> str:
     return path
 
 
+def _resolve_workspace_relative_path(workspace_path: Path, raw_path: str) -> Path:
+    candidate = Path(raw_path)
+    if candidate.is_absolute():
+        resolved = candidate.resolve()
+    else:
+        resolved = (workspace_path / candidate).resolve()
+
+    workspace_root = workspace_path.resolve()
+    if resolved != workspace_root and workspace_root not in resolved.parents:
+        raise ValueError(f"Full-file response references a path outside the workspace: {raw_path}")
+
+    return resolved.relative_to(workspace_root)
+
+
 def _extract_hunks(body_lines: list[str]) -> list[list[str]]:
     hunks: list[list[str]] = []
     current_hunk: list[str] | None = None
@@ -254,6 +316,35 @@ def _rebuild_patch_against_workspace(workspace_path: Path, patch_text: str) -> s
         for old_path, new_path, body_lines in _split_patch_sections(patch_text)
     ]
     rebuilt = "\n".join(section for section in rebuilt_sections if section).strip()
+    if rebuilt and not rebuilt.endswith("\n"):
+        rebuilt = f"{rebuilt}\n"
+    return rebuilt
+
+
+def build_patch_from_full_file_response(workspace_path: Path, text: str) -> str:
+    rewrites = parse_full_file_response(text)
+    sections: list[str] = []
+
+    for raw_path, new_text in rewrites:
+        relative_path = _resolve_workspace_relative_path(workspace_path, raw_path)
+        target_path = workspace_path / relative_path
+        if not target_path.exists():
+            raise ValueError(f"Full-file response references a missing file: {relative_path}")
+
+        original_text = target_path.read_text(encoding="utf-8")
+        diff_lines = list(
+            difflib.unified_diff(
+                original_text.splitlines(),
+                new_text.splitlines(),
+                fromfile=f"a/{relative_path.as_posix()}",
+                tofile=f"b/{relative_path.as_posix()}",
+                lineterm="",
+            )
+        )
+        if diff_lines:
+            sections.append("\n".join(diff_lines))
+
+    rebuilt = "\n".join(section for section in sections if section).strip()
     if rebuilt and not rebuilt.endswith("\n"):
         rebuilt = f"{rebuilt}\n"
     return rebuilt

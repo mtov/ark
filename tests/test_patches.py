@@ -6,7 +6,13 @@ from pathlib import Path
 import pytest
 
 from ark import patches
-from ark.patches import auto_repair_patch_text, validate_patch, validate_and_repair_patch
+from ark.patches import (
+    auto_repair_patch_text,
+    build_patch_from_full_file_response,
+    parse_full_file_response,
+    validate_patch,
+    validate_and_repair_patch,
+)
 
 
 def write_sample_file(workspace_path: Path) -> None:
@@ -124,6 +130,43 @@ def test_validate_and_repair_patch_recalculates_hunk_header_counts(tmp_path: Pat
 -hello
 +hi
  world
+"""
+
+
+def test_parse_full_file_response_reads_single_file_block() -> None:
+    rewrites = parse_full_file_response(
+        """FILE: src/hello.txt
+```text
+hello
+there
+```
+"""
+    )
+
+    assert rewrites == [("src/hello.txt", "hello\nthere")]
+
+
+def test_build_patch_from_full_file_response_generates_diff(tmp_path: Path) -> None:
+    src_dir = tmp_path / "src"
+    src_dir.mkdir()
+    (src_dir / "hello.txt").write_text("hello\nworld\n", encoding="utf-8")
+
+    patch_text = build_patch_from_full_file_response(
+        tmp_path,
+        """FILE: src/hello.txt
+```text
+hello
+there
+```
+""",
+    )
+
+    assert patch_text == """--- a/src/hello.txt
++++ b/src/hello.txt
+@@ -1,2 +1,2 @@
+ hello
+-world
++there
 """
 
 

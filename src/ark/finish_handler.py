@@ -3,12 +3,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .inputs import AgentConfig
-from .patches import apply_patch, save_patch, validate_and_repair_patch
+from .patches import (
+    apply_patch,
+    build_patch_from_full_file_response,
+    looks_like_full_file_response,
+    save_patch,
+    validate_and_repair_patch,
+)
 from .protocol import ToolRequest, looks_like_patch
 from .traces import trace_finish_event
 from .tools import run_tests_with_status
 
-INVALID_FINISH_PATCH_MESSAGE = "Finish output must be a unified diff patch."
+INVALID_FINISH_PATCH_MESSAGE = (
+    "Finish output must be a unified diff patch or FILE: sections with complete file contents."
+)
 
 
 @dataclass
@@ -29,9 +37,13 @@ def apply_finish(
     tool_request: ToolRequest,
 ) -> FinishResult:
     workspace_path = config.workspace_path
-    patch_text = tool_request.args
+    finish_text = tool_request.args
 
-    if not looks_like_patch(patch_text):
+    if looks_like_patch(finish_text):
+        patch_text = finish_text
+    elif looks_like_full_file_response(finish_text):
+        patch_text = build_patch_from_full_file_response(workspace_path, finish_text)
+    else:
         trace_finish_event(
             "failed",
             "finish_validation",
