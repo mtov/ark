@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ark.agentic_loop import (
+    FULL_FILE_REQUIRED_MESSAGE,
     INVALID_FINISH_MESSAGE,
     MAX_ITERATIONS_REACHED_MESSAGE,
     REDUNDANT_READ_FILE_MESSAGE,
@@ -285,6 +286,64 @@ def test_agentic_loop_retries_after_patch_validation_failure(monkeypatch, capsys
     assert "[1] finish" in captured.out
     assert "[2] finish" in captured.out
     assert summarize_patch_failure(ValueError("Patch validation failed for src/pricing.py")) in seen_histories[1]
+
+
+def test_agentic_loop_requires_full_file_after_two_patch_validation_failures(monkeypatch, capsys) -> None:
+    context = build_context()
+    responses = iter(
+        [
+            ToolRequest(
+                thought="first try",
+                name="finish",
+                args="--- a/file.py\n+++ b/file.py\n@@ -1 +1 @@\n-old\n+attempt1\n",
+            ),
+            ToolRequest(
+                thought="second try",
+                name="finish",
+                args="--- a/file.py\n+++ b/file.py\n@@ -1 +1 @@\n-old\n+attempt2\n",
+            ),
+            ToolRequest(
+                thought="third try",
+                name="finish",
+                args="--- a/file.py\n+++ b/file.py\n@@ -1 +1 @@\n-old\n+attempt3\n",
+            ),
+            ToolRequest(
+                thought="fallback",
+                name="finish",
+                args="FILE: file.py\n```python\nnew contents\n```\n",
+            ),
+        ]
+    )
+    seen_histories: list[str] = []
+    finish_attempts = 0
+
+    def fake_get_next_tool_request(_context: AgentConfig, history: Memory) -> ToolRequest:
+        seen_histories.append(history.to_text())
+        return next(responses)
+
+    def fake_apply_finish(_context: AgentConfig, tool_request: ToolRequest) -> FinishResult:
+        nonlocal finish_attempts
+        finish_attempts += 1
+        if tool_request.args.startswith("FILE:"):
+            return FinishResult(
+                status="applied",
+                request=tool_request,
+                tools_called=["apply_patch", "run_tests"],
+            )
+        raise ValueError(f"Patch validation failed for attempt {finish_attempts}")
+
+    monkeypatch.setattr("ark.agentic_loop.get_next_tool_request", fake_get_next_tool_request)
+    monkeypatch.setattr("ark.agentic_loop.apply_finish", fake_apply_finish)
+
+    result = agentic_loop(context)
+    captured = capsys.readouterr()
+
+    assert result.status == "success"
+    assert result.output == "FILE: file.py\n```python\nnew contents\n```\n"
+    assert "[1] finish" in captured.out
+    assert "[2] finish" in captured.out
+    assert "[3] finish" in captured.out
+    assert FULL_FILE_REQUIRED_MESSAGE in seen_histories[3]
 
 
 def test_summarize_test_failure_output_extracts_failed_cases() -> None:

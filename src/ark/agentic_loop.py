@@ -31,6 +31,11 @@ INVALID_FINISH_MESSAGE = (
 PATCH_FAILURE_MESSAGE_PREFIX = (
     "Patch validation failed. Use the error below to produce a corrected patch.\n\n"
 )
+FULL_FILE_REQUIRED_MESSAGE = (
+    "Patch validation failed multiple times. "
+    "Your next finish response must use complete file contents with FILE: sections and triple-backtick blocks. "
+    "Do not return another unified diff."
+)
 FULL_FILE_FALLBACK_MESSAGE = (
     "\n\nIf the patch keeps failing, you may instead return complete file contents in this format:\n\n"
     "FILE: src/example.py\n"
@@ -111,6 +116,14 @@ class Memory:
 
     def contains_tool(self, name: str) -> bool:
         return any(entry.tool_request.name == name for entry in self.entries)
+
+    def count_patch_validation_failures(self) -> int:
+        return sum(
+            1
+            for entry in self.entries
+            if entry.tool_request.name == "finish"
+            and entry.result.startswith(PATCH_FAILURE_MESSAGE_PREFIX)
+        )
 
     def _unique_tool_args(self, name: str) -> list[str]:
         seen: set[str] = set()
@@ -204,6 +217,11 @@ def handle_finish(
     iteration: int,
     tool_request: ToolRequest,
 ) -> tuple[str, list[str]] | None:
+    if memory.count_patch_validation_failures() >= 2 and looks_like_patch(tool_request.args):
+        print_iteration_action(iteration, tool_request)
+        memory.append(iteration, tool_request, FULL_FILE_REQUIRED_MESSAGE)
+        return None
+
     if not looks_like_patch(tool_request.args) and not looks_like_full_file_response(tool_request.args):
         print_iteration_action(iteration, tool_request)
         memory.append(iteration, tool_request, INVALID_FINISH_MESSAGE)
