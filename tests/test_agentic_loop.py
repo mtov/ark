@@ -223,7 +223,7 @@ def test_agentic_loop_retries_after_post_apply_test_failure(monkeypatch, capsys)
     monkeypatch.setattr("ark.agentic_loop.get_next_tool_request", fake_get_next_tool_request)
     monkeypatch.setattr("ark.agentic_loop.apply_finish", fake_apply_finish)
     monkeypatch.setattr("ark.agentic_loop.reset_runtime_workspace", fake_reset_runtime_workspace)
-    monkeypatch.setattr("ark.agentic_loop.run_tool", lambda _tool_request, _context: "file contents")
+    monkeypatch.setattr("ark.agentic_loop.run_tool_with_status", lambda _tool_request, _context, _previous_request=None: ("file contents", None))
 
     result = agentic_loop(context)
     captured = capsys.readouterr()
@@ -386,7 +386,7 @@ def test_agentic_loop_returns_error_result_when_max_iterations_reached(monkeypat
             args=".",
         ),
     )
-    monkeypatch.setattr("ark.agentic_loop.run_tool", lambda _tool_request, _context: "src\ntests")
+    monkeypatch.setattr("ark.agentic_loop.run_tool_with_status", lambda _tool_request, _context, _previous_request=None: ("src\ntests", None))
 
     result = agentic_loop(context)
 
@@ -439,14 +439,14 @@ def test_agentic_loop_short_circuits_redundant_consecutive_read_file(monkeypatch
         seen_histories.append(history.to_text())
         return next(responses)
 
-    run_tool_calls: list[str] = []
+    read_file_calls: list[str] = []
 
-    def fake_run_tool(tool_request: ToolRequest, _context: AgentConfig) -> str:
-        run_tool_calls.append(tool_request.args)
+    def fake_read_file(_action_input: str, _workspace_path: Path) -> str:
+        read_file_calls.append(_action_input)
         return "file contents"
 
     monkeypatch.setattr("ark.agentic_loop.get_next_tool_request", fake_get_next_tool_request)
-    monkeypatch.setattr("ark.agentic_loop.run_tool", fake_run_tool)
+    monkeypatch.setattr("ark.tools.read_file", fake_read_file)
     monkeypatch.setattr(
         "ark.agentic_loop.apply_finish",
         lambda _context, tool_request: FinishResult(
@@ -460,7 +460,7 @@ def test_agentic_loop_short_circuits_redundant_consecutive_read_file(monkeypatch
     captured = capsys.readouterr()
 
     assert result.status == "success"
-    assert run_tool_calls == ["src/products.py"]
+    assert read_file_calls == ["src/products.py"]
     assert "[1] read_file products.py" in captured.out
     assert "[2] read_file products.py (skipped: redundant)" in captured.out
     assert REDUNDANT_READ_FILE_MESSAGE in seen_histories[2]

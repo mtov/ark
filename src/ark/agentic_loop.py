@@ -16,7 +16,7 @@ from .models import call_model
 from .patches import looks_like_full_file_response
 from .protocol import ToolRequest, looks_like_patch, parse_response, repair_response
 from .test_failures import summarize_test_failure_output
-from .tools import run_tool
+from .tools import REDUNDANT_READ_FILE_MESSAGE, run_tool_with_status
 from .traces import trace_run_summary, trace_validation_error
 
 MAX_HISTORY_ENTRIES = 4
@@ -46,10 +46,6 @@ FULL_FILE_FALLBACK_MESSAGE = (
     "Repeat one FILE block per modified file."
 )
 MAX_ITERATIONS = 15
-REDUNDANT_READ_FILE_MESSAGE = (
-    "You just read this file in the previous step. Do not read it again unless the file changed "
-    "or you need to verify a specific detail before finishing."
-)
 
 
 @dataclass
@@ -116,6 +112,11 @@ class Memory:
 
     def contains_tool(self, name: str) -> bool:
         return any(entry.tool_request.name == name for entry in self.entries)
+
+    def last_tool_request(self) -> ToolRequest | None:
+        if not self.entries:
+            return None
+        return self.entries[-1].tool_request
 
     def count_patch_validation_failures(self) -> int:
         return sum(
@@ -249,22 +250,6 @@ def handle_finish(
     print_iteration_action(iteration, tool_request)
     return tool_request.args, finish_tools_called
 
-
-def maybe_short_circuit_redundant_tool_request(memory: Memory, tool_request: ToolRequest) -> str | None:
-    if not memory.entries:
-        return None
-
-    previous_request = memory.entries[-1].tool_request
-    if (
-        tool_request.name == "read_file"
-        and previous_request.name == "read_file"
-        and tool_request.args.strip() == previous_request.args.strip()
-    ):
-        return REDUNDANT_READ_FILE_MESSAGE
-
-    return None
-
-
 def agentic_loop(config: AgentConfig) -> LoopResult:
     memory = Memory()
     tools_called: list[str] = []
@@ -284,12 +269,9 @@ def agentic_loop(config: AgentConfig) -> LoopResult:
                 tools_called=tools_called + finish_tools_called,
             )
 
-        result = maybe_short_circuit_redundant_tool_request(memory, tool_request)
-        if result is None:
-            print_iteration_action(iteration, tool_request)
-            result = run_tool(tool_request, config)
-        else:
-            print_iteration_action(iteration, tool_request, "skipped: redundant")
+        previous_request = memory.last_tool_request()
+        result, note = run_tool_with_status(tool_request, config, previous_request)
+        print_iteration_action(iteration, tool_request, note)
         memory.append(iteration, tool_request, result)
 
     return LoopResult.max_iterations_reached(tools_called=tools_called)

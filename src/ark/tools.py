@@ -13,6 +13,11 @@ MAX_FIND_TEXT_MATCHES = 20
 SKIPPED_DIRECTORIES = {".git", ".venv", "__pycache__"}
 TEST_COMMAND = (sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider")
 TEST_TIMEOUT_SECONDS = 30
+REDUNDANT_READ_FILE_MESSAGE = (
+    "Redundant tool request skipped: your previous read_file call already read this same file. "
+    "Do not request the same file again unless it changed or you need to verify a specific detail "
+    "before finishing. Continue with a different action."
+)
 
 
 def _resolve_workspace_target(action_input: str, workspace_path: Path) -> Path | str:
@@ -148,8 +153,44 @@ def run_tests(workspace_path: Path) -> str:
     return output
 
 
-def run_tool(request: ToolRequest, config: AgentConfig) -> str:
+def should_skip_redundant_tool_request(
+    request: ToolRequest,
+    previous_request: ToolRequest | None = None,
+) -> str | None:
+    if previous_request is None:
+        return None
+
+    if (
+        request.name == "read_file"
+        and previous_request.name == "read_file"
+        and request.args.strip() == previous_request.args.strip()
+    ):
+        return REDUNDANT_READ_FILE_MESSAGE
+
+    return None
+
+
+def run_tool_with_status(
+    request: ToolRequest,
+    config: AgentConfig,
+    previous_request: ToolRequest | None = None,
+) -> tuple[str, str | None]:
+    skipped_reason = should_skip_redundant_tool_request(request, previous_request)
+    if skipped_reason is not None:
+        return skipped_reason, "skipped: redundant"
+
+    return run_tool(request, config, previous_request), None
+
+
+def run_tool(
+    request: ToolRequest,
+    config: AgentConfig,
+    previous_request: ToolRequest | None = None,
+) -> str:
     workspace_path = config.workspace_path
+    skipped_reason = should_skip_redundant_tool_request(request, previous_request)
+    if skipped_reason is not None:
+        return skipped_reason
 
     if request.name == "list_files":
         return list_files(request.args, workspace_path)
