@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from ark.agentic_loop import (
+    FinishResult,
     FULL_FILE_REQUIRED_MESSAGE,
     INVALID_FINISH_MESSAGE,
     MAX_ITERATIONS_REACHED_MESSAGE,
@@ -19,7 +20,7 @@ from ark.cli_output import (
     print_elapsed_time,
     print_final_result,
 )
-from ark.finish_handler import FinishResult
+from ark.finish_handler import ApplyFinishResult
 from ark.inputs import AgentConfig
 from ark.models import ModelConfig
 from ark.protocol import ToolRequest
@@ -157,7 +158,7 @@ def test_agentic_loop_retries_after_invalid_finish(monkeypatch, capsys) -> None:
     monkeypatch.setattr("ark.agentic_loop.get_next_tool_request", fake_get_next_tool_request)
     monkeypatch.setattr(
         "ark.agentic_loop.apply_finish",
-        lambda _context, tool_request: FinishResult(
+        lambda _context, tool_request: ApplyFinishResult(
             status="applied",
             request=tool_request,
             tools_called=["apply_patch", "run_tests"],
@@ -200,17 +201,17 @@ def test_agentic_loop_retries_after_post_apply_test_failure(monkeypatch, capsys)
         seen_histories.append(history.to_text())
         return next(responses)
 
-    def fake_apply_finish(_context: AgentConfig, tool_request: ToolRequest) -> FinishResult:
+    def fake_apply_finish(_context: AgentConfig, tool_request: ToolRequest) -> ApplyFinishResult:
         nonlocal finish_attempts
         finish_attempts += 1
         if finish_attempts == 1:
-            return FinishResult(
+            return ApplyFinishResult(
                 status="post_apply_tests_failed",
                 request=tool_request,
                 test_output="..F\nassert 1 == 2",
                 tools_called=["apply_patch", "run_tests"],
             )
-        return FinishResult(
+        return ApplyFinishResult(
             status="applied",
             request=tool_request,
             tools_called=["apply_patch", "run_tests"],
@@ -263,12 +264,12 @@ def test_agentic_loop_retries_after_patch_validation_failure(monkeypatch, capsys
         seen_histories.append(history.to_text())
         return next(responses)
 
-    def fake_apply_finish(_context: AgentConfig, tool_request: ToolRequest) -> FinishResult:
+    def fake_apply_finish(_context: AgentConfig, tool_request: ToolRequest) -> ApplyFinishResult:
         nonlocal finish_attempts
         finish_attempts += 1
         if finish_attempts == 1:
             raise ValueError("Patch validation failed for src/pricing.py")
-        return FinishResult(
+        return ApplyFinishResult(
             status="applied",
             request=tool_request,
             tools_called=["apply_patch", "run_tests"],
@@ -321,11 +322,11 @@ def test_agentic_loop_requires_full_file_after_two_patch_validation_failures(mon
         seen_histories.append(history.to_text())
         return next(responses)
 
-    def fake_apply_finish(_context: AgentConfig, tool_request: ToolRequest) -> FinishResult:
+    def fake_apply_finish(_context: AgentConfig, tool_request: ToolRequest) -> ApplyFinishResult:
         nonlocal finish_attempts
         finish_attempts += 1
         if tool_request.args.startswith("FILE:"):
-            return FinishResult(
+            return ApplyFinishResult(
                 status="applied",
                 request=tool_request,
                 tools_called=["apply_patch", "run_tests"],
@@ -408,7 +409,7 @@ def test_agentic_loop_records_finish_internal_tools_in_tools_called(monkeypatch)
     )
     monkeypatch.setattr(
         "ark.agentic_loop.apply_finish",
-        lambda _context, tool_request: FinishResult(
+        lambda _context, tool_request: ApplyFinishResult(
             status="applied",
             request=tool_request,
             tools_called=["apply_patch", "run_tests"],
@@ -449,7 +450,7 @@ def test_agentic_loop_short_circuits_redundant_consecutive_read_file(monkeypatch
     monkeypatch.setattr("ark.tools.read_file", fake_read_file)
     monkeypatch.setattr(
         "ark.agentic_loop.apply_finish",
-        lambda _context, tool_request: FinishResult(
+        lambda _context, tool_request: ApplyFinishResult(
             status="applied",
             request=tool_request,
             tools_called=["apply_patch", "run_tests"],

@@ -91,6 +91,12 @@ class LoopResult:
 
 
 @dataclass
+class FinishResult:
+    output: str
+    tools_called: list[str]
+
+
+@dataclass
 class MemoryEntry:
     iteration: int
     tool_request: ToolRequest
@@ -217,7 +223,7 @@ def handle_finish(
     memory: Memory,
     iteration: int,
     tool_request: ToolRequest,
-) -> tuple[str, list[str]] | None:
+) -> FinishResult | None:
     if memory.count_patch_validation_failures() >= 2 and looks_like_patch(tool_request.args):
         print_iteration_action(iteration, tool_request)
         memory.append(iteration, tool_request, FULL_FILE_REQUIRED_MESSAGE)
@@ -248,7 +254,7 @@ def handle_finish(
 
     tool_request = finish_result.request
     print_iteration_action(iteration, tool_request)
-    return tool_request.args, finish_tools_called
+    return FinishResult(output=tool_request.args, tools_called=finish_tools_called)
 
 def agentic_loop(config: AgentConfig) -> LoopResult:
     memory = Memory()
@@ -262,11 +268,10 @@ def agentic_loop(config: AgentConfig) -> LoopResult:
             finish_output = handle_finish(config, memory, iteration, tool_request)
             if finish_output is None:
                 continue
-            output, finish_tools_called = finish_output
             return LoopResult.success(
-                output,
+                finish_output.output,
                 post_apply_tests_passed=True,
-                tools_called=tools_called + finish_tools_called,
+                tools_called=tools_called + finish_output.tools_called,
             )
 
         previous_request = memory.last_tool_request()

@@ -20,7 +20,7 @@ INVALID_FINISH_PATCH_MESSAGE = (
 
 
 @dataclass
-class FinishResult:
+class ApplyFinishResult:
     status: str
     request: ToolRequest
     test_output: str | None = None
@@ -35,7 +35,7 @@ def _trace_and_raise(stage: str, exc: Exception) -> None:
 def apply_finish(
     config: AgentConfig,
     tool_request: ToolRequest,
-) -> FinishResult:
+) -> ApplyFinishResult:
     workspace_path = config.workspace_path
     finish_text = tool_request.args
 
@@ -70,7 +70,7 @@ def apply_finish(
     tests_succeeded, test_output = run_tests_with_status(workspace_path)
     if not tests_succeeded:
         trace_finish_event("failed", "post_apply_tests", test_output)
-        return FinishResult(
+        return ApplyFinishResult(
             status="post_apply_tests_failed",
             request=tool_request,
             test_output=test_output,
@@ -78,7 +78,7 @@ def apply_finish(
         )
 
     trace_finish_event("completed", "finish")
-    return FinishResult(
+    return ApplyFinishResult(
         status="applied",
         request=tool_request,
         tools_called=["apply_patch", "run_tests"],
