@@ -330,13 +330,27 @@ def test_validate_and_repair_patch_accepts_trailing_end_patch_marker(tmp_path: P
 
 def test_run_mutating_command_requires_approval(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr("builtins.input", lambda _: "n")
+    events: list[tuple[str, str, Path]] = []
+    monkeypatch.setattr(
+        patches,
+        "trace_command_event",
+        lambda status, command, cwd, **_kwargs: events.append((status, command, cwd)),
+    )
 
     with pytest.raises(PermissionError, match="User rejected command"):
         patches._run_mutating_command(["git", "status"], tmp_path)
 
+    assert events == [("rejected", "git status", tmp_path)]
+
 
 def test_run_mutating_command_executes_after_approval(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr("builtins.input", lambda _: "y")
+    events: list[tuple[str, int | None, str | None]] = []
+    monkeypatch.setattr(
+        patches,
+        "trace_command_event",
+        lambda status, _command, _cwd, exit_code=None, detail=None: events.append((status, exit_code, detail)),
+    )
 
     def fake_run(command: list[str], cwd: Path, capture_output: bool, text: bool) -> subprocess.CompletedProcess[str]:
         return subprocess.CompletedProcess(command, 0, stdout="ok", stderr="")
@@ -346,6 +360,32 @@ def test_run_mutating_command_executes_after_approval(tmp_path: Path, monkeypatc
     result = patches._run_mutating_command(["git", "status"], tmp_path)
 
     assert result.returncode == 0
+    assert events == [("succeeded", 0, None)]
+
+
+def test_run_mutating_command_traces_failure(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr("builtins.input", lambda _: "y")
+    events: list[tuple[str, int | None, str | None]] = []
+    monkeypatch.setattr(
+        patches,
+        "trace_command_event",
+        lambda status, _command, _cwd, exit_code=None, detail=None: events.append((status, exit_code, detail)),
+    )
+    monkeypatch.setattr(
+        patches.subprocess,
+        "run",
+        lambda command, cwd, capture_output, text: subprocess.CompletedProcess(
+            command,
+            1,
+            stdout="",
+            stderr="patch does not apply",
+        ),
+    )
+
+    result = patches._run_mutating_command(["git", "apply", "patch.txt"], tmp_path)
+
+    assert result.returncode == 1
+    assert events == [("failed", 1, "patch does not apply")]
 
 
 def test_run_mutating_command_prints_preview_when_provided(capsys, tmp_path: Path, monkeypatch) -> None:

@@ -413,10 +413,10 @@ def _request_command_approval(command: list[str], cwd: Path, preview: str | None
     if preview is not None:
         print("Command preview:")
         print(preview)
-    trace_command_event("proposed", formatted_command, cwd)
     answer = input("Authorize command? [y/N]: ").strip().lower()
     approved = answer in {"y", "yes"}
-    trace_command_event("approved" if approved else "rejected", formatted_command, cwd)
+    if not approved:
+        trace_command_event("rejected", formatted_command, cwd)
     return approved
 
 
@@ -430,13 +430,21 @@ def _run_mutating_command(
         raise PermissionError(f"User rejected command: {formatted_command}")
 
     print(f"Executing command: {formatted_command}")
-    trace_command_event("executed", formatted_command, cwd)
-    return subprocess.run(
+    result = subprocess.run(
         command,
         cwd=cwd,
         capture_output=True,
         text=True,
     )
+    detail = result.stderr.strip() or result.stdout.strip() or None
+    trace_command_event(
+        "succeeded" if result.returncode == 0 else "failed",
+        formatted_command,
+        cwd,
+        exit_code=result.returncode,
+        detail=detail if result.returncode != 0 else None,
+    )
+    return result
 
 
 def apply_patch(workspace_path: Path) -> None:

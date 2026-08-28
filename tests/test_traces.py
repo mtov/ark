@@ -57,6 +57,27 @@ def test_trace_finish_event_records_stage_and_detail(monkeypatch, tmp_path: Path
     assert "detail: corrupt patch" in content
 
 
+def test_trace_command_event_records_result_details(monkeypatch, tmp_path: Path) -> None:
+    log_path = tmp_path / "agent_trace.log"
+    monkeypatch.setattr(traces, "LOG_PATH", log_path)
+
+    traces.clear_trace()
+    traces.trace_command_event(
+        "failed",
+        "git apply patch.txt",
+        tmp_path,
+        exit_code=1,
+        detail="patch does not apply",
+    )
+
+    content = log_path.read_text(encoding="utf-8")
+
+    assert "[command]" in content
+    assert "status: failed" in content
+    assert "exit_code: 1" in content
+    assert "detail: patch does not apply" in content
+
+
 def test_trace_run_summary_records_total_tokens_and_elapsed_time(monkeypatch, tmp_path: Path) -> None:
     log_path = tmp_path / "agent_trace.log"
     monkeypatch.setattr(traces, "LOG_PATH", log_path)

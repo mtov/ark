@@ -66,13 +66,24 @@ def trace_repair_attempt(repair_kind: str, reason: str) -> None:
     )
 
 
-def trace_command_event(status: str, command: str, cwd: Path) -> None:
-    _append_trace(
+def trace_command_event(
+    status: str,
+    command: str,
+    cwd: Path,
+    exit_code: int | None = None,
+    detail: str | None = None,
+) -> None:
+    trace = (
         "[command]\n"
         f"status: {status}\n"
         f"command: {command}\n"
-        f"cwd: {cwd}\n\n"
+        f"cwd: {cwd}\n"
     )
+    if exit_code is not None:
+        trace += f"exit_code: {exit_code}\n"
+    if detail:
+        trace += f"detail: {detail}\n"
+    _append_trace(f"{trace}\n")
 
 
 def trace_finish_event(status: str, stage: str, detail: str | None = None) -> None:
