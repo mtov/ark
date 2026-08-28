@@ -66,5 +66,5 @@ def looks_like_patch(text: str) -> bool:
 def repair_response(config: AgentConfig, user_message: str, reason: str) -> ToolRequest:
     trace_repair_attempt("Protocol repair", reason)
     repair_message = f"{user_message}\n\n{REPAIR_PROMPT}"
-    response = call_model(config, repair_message, "Repair Response")
+    response = call_model(config, repair_message)
     return parse_response(response.content)

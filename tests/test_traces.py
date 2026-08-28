@@ -7,7 +7,7 @@ from ark.models import TokenUsage
 from ark.protocol import ToolRequest
 
 
-def test_trace_response_records_responses_and_cumulative_total(
+def test_record_response_usage_accumulates_total_tokens(
     monkeypatch,
     tmp_path: Path,
 ) -> None:
@@ -15,21 +15,13 @@ def test_trace_response_records_responses_and_cumulative_total(
     monkeypatch.setattr(traces, "LOG_PATH", log_path)
 
     traces.clear_trace()
-    traces.trace_response(
-        "first response",
+    traces.record_response_usage(
         token_usage=TokenUsage(input_tokens=10, output_tokens=5, total_tokens=15),
     )
-    traces.trace_response(
-        "second response",
+    traces.record_response_usage(
         token_usage=TokenUsage(input_tokens=4, output_tokens=3, total_tokens=7),
     )
 
-    content = log_path.read_text(encoding="utf-8")
-
-    assert "[response 1]" in content
-    assert "first response" in content
-    assert "[response 2]" in content
-    assert "second response" in content
     assert traces.get_total_tokens() == 22
 
 
@@ -38,7 +30,7 @@ def test_get_total_tokens_returns_none_when_usage_is_unavailable(monkeypatch, tm
     monkeypatch.setattr(traces, "LOG_PATH", log_path)
 
     traces.clear_trace()
-    traces.trace_response("response without usage", token_usage=TokenUsage())
+    traces.record_response_usage(token_usage=TokenUsage())
 
     assert traces.get_total_tokens() is None
 
@@ -84,6 +76,7 @@ def test_trace_action_uses_one_line_for_action_and_arguments(monkeypatch, tmp_pa
     monkeypatch.setattr(traces, "LOG_PATH", log_path)
 
     traces.clear_trace()
+    traces.record_response_usage()
     traces.trace_action(
         ToolRequest(
             thought="Inspect the implementation.",
@@ -94,7 +87,7 @@ def test_trace_action_uses_one_line_for_action_and_arguments(monkeypatch, tmp_pa
 
     content = log_path.read_text(encoding="utf-8")
 
-    assert "[action 1]" in content
+    assert "[response 1]" in content
     assert "thought: Inspect the implementation." in content
     assert "action: read_file src/products.py" in content
     assert "action_input" not in content
@@ -105,6 +98,7 @@ def test_trace_action_records_finish_patch_separately(monkeypatch, tmp_path: Pat
     monkeypatch.setattr(traces, "LOG_PATH", log_path)
 
     traces.clear_trace()
+    traces.record_response_usage()
     traces.trace_action(
         ToolRequest(
             thought="Apply the fix.",
@@ -124,8 +118,7 @@ def test_trace_run_summary_records_total_tokens_and_elapsed_time(monkeypatch, tm
     monkeypatch.setattr(traces, "LOG_PATH", log_path)
 
     traces.clear_trace()
-    traces.trace_response(
-        "response",
+    traces.record_response_usage(
         token_usage=TokenUsage(input_tokens=2, output_tokens=3, total_tokens=5),
     )
     traces.trace_run_summary(12.345, ["list_files", "read_file", "finish", "apply_patch", "run_tests"])

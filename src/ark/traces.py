@@ -10,7 +10,6 @@ if TYPE_CHECKING:
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 LOG_PATH = PROJECT_ROOT / "agent_trace.log"
 CALL_COUNT = 0
-ACTION_COUNT = 0
 TOTAL_TOKENS = 0
 
 
@@ -20,9 +19,8 @@ def _append_trace(text: str) -> None:
 
 
 def clear_trace() -> None:
-    global CALL_COUNT, ACTION_COUNT, TOTAL_TOKENS
+    global CALL_COUNT, TOTAL_TOKENS
     CALL_COUNT = 0
-    ACTION_COUNT = 0
     TOTAL_TOKENS = 0
     LOG_PATH.write_text("", encoding="utf-8")
 
@@ -35,21 +33,12 @@ def get_total_tokens() -> int | None:
     return TOTAL_TOKENS or None
 
 
-def trace_response(
-    response: str,
-    label: str = "Response",
-    token_usage: TokenUsage | None = None,
-) -> None:
+def record_response_usage(token_usage: TokenUsage | None = None) -> None:
     global CALL_COUNT, TOTAL_TOKENS
     CALL_COUNT += 1
     total_tokens = token_usage.total_tokens if token_usage is not None else None
     if total_tokens is not None:
         TOTAL_TOKENS += total_tokens
-
-    _append_trace(
-        f"[{label.lower().replace(' ', '_')} {CALL_COUNT}]\n"
-        f"{response}\n\n"
-    )
 
 
 def trace_validation_error(reason: str, response: str) -> None:
@@ -62,9 +51,6 @@ def trace_validation_error(reason: str, response: str) -> None:
 
 
 def trace_action(tool_request: ToolRequest) -> None:
-    global ACTION_COUNT
-    ACTION_COUNT += 1
-
     args = tool_request.args.strip()
     action = tool_request.name
     if action == "list_files":
@@ -73,7 +59,7 @@ def trace_action(tool_request: ToolRequest) -> None:
         action = f"{action} {args}"
 
     trace = (
-        f"[action {ACTION_COUNT}]\n"
+        f"[response {CALL_COUNT}]\n"
         f"thought: {tool_request.thought}\n"
         f"action: {action}\n"
     )

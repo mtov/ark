@@ -7,7 +7,7 @@ import os
 from typing import TYPE_CHECKING
 from urllib import error, request
 
-from .traces import trace_response
+from .traces import record_response_usage
 
 if TYPE_CHECKING:
     from .inputs import AgentConfig
@@ -262,7 +262,6 @@ def call_ollama(config: AgentConfig, user_prompt: str) -> ModelResponse:
 def call_model(
     config: AgentConfig,
     user_prompt: str,
-    response_label: str = "Response",
 ) -> ModelResponse:
     model = config.model_config.model
 
@@ -273,5 +272,5 @@ def call_model(
     else:
         raise ValueError(f"Unsupported model: {model}")
 
-    trace_response(response.content, response_label, response.token_usage)
+    record_response_usage(response.token_usage)
     return response
