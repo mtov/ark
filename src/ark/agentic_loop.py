@@ -17,7 +17,7 @@ from .patches import looks_like_full_file_response
 from .protocol import ToolRequest, looks_like_patch, parse_response, repair_response
 from .test_failures import summarize_test_failure_output
 from .tools import REDUNDANT_READ_FILE_MESSAGE, run_tool_with_status
-from .traces import trace_run_summary, trace_validation_error
+from .traces import trace_action, trace_run_summary, trace_validation_error
 
 MAX_HISTORY_ENTRIES = 4
 MAX_OBSERVATION_CHARS = 1200
@@ -192,10 +192,13 @@ def get_next_tool_request(config: AgentConfig, memory: Memory) -> ToolRequest:
     model_response = call_model(config, user_message)
 
     try:
-        return parse_response(model_response.content)
+        tool_request = parse_response(model_response.content)
     except ValueError as exc:
         trace_validation_error(str(exc), model_response.content)
-        return repair_response(config, user_message, str(exc))
+        tool_request = repair_response(config, user_message, str(exc))
+
+    trace_action(tool_request)
+    return tool_request
 
 
 def handle_post_apply_test_failure(

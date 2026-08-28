@@ -5,10 +5,12 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .models import TokenUsage
+    from .protocol import ToolRequest
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 LOG_PATH = PROJECT_ROOT / "agent_trace.log"
 CALL_COUNT = 0
+ACTION_COUNT = 0
 TOTAL_TOKENS = 0
 
 
@@ -18,8 +20,9 @@ def _append_trace(text: str) -> None:
 
 
 def clear_trace() -> None:
-    global CALL_COUNT, TOTAL_TOKENS
+    global CALL_COUNT, ACTION_COUNT, TOTAL_TOKENS
     CALL_COUNT = 0
+    ACTION_COUNT = 0
     TOTAL_TOKENS = 0
     LOG_PATH.write_text("", encoding="utf-8")
 
@@ -56,6 +59,27 @@ def trace_validation_error(reason: str, response: str) -> None:
         "response:\n"
         f"{response}\n\n"
     )
+
+
+def trace_action(tool_request: ToolRequest) -> None:
+    global ACTION_COUNT
+    ACTION_COUNT += 1
+
+    args = tool_request.args.strip()
+    action = tool_request.name
+    if action == "list_files":
+        action = f"{action} {args or '.'}"
+    elif args and tool_request.name != "finish":
+        action = f"{action} {args}"
+
+    trace = (
+        f"[action {ACTION_COUNT}]\n"
+        f"thought: {tool_request.thought}\n"
+        f"action: {action}\n"
+    )
+    if tool_request.name == "finish" and args:
+        trace += f"patch:\n{args}\n"
+    _append_trace(f"{trace}\n")
 
 
 def trace_repair_attempt(repair_kind: str, reason: str) -> None:

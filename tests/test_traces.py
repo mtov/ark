@@ -4,6 +4,7 @@ from pathlib import Path
 
 from ark import traces
 from ark.models import TokenUsage
+from ark.protocol import ToolRequest
 
 
 def test_trace_response_records_responses_and_cumulative_total(
@@ -76,6 +77,46 @@ def test_trace_command_event_records_result_details(monkeypatch, tmp_path: Path)
     assert "status: failed" in content
     assert "exit_code: 1" in content
     assert "detail: patch does not apply" in content
+
+
+def test_trace_action_uses_one_line_for_action_and_arguments(monkeypatch, tmp_path: Path) -> None:
+    log_path = tmp_path / "agent_trace.log"
+    monkeypatch.setattr(traces, "LOG_PATH", log_path)
+
+    traces.clear_trace()
+    traces.trace_action(
+        ToolRequest(
+            thought="Inspect the implementation.",
+            name="read_file",
+            args="src/products.py",
+        )
+    )
+
+    content = log_path.read_text(encoding="utf-8")
+
+    assert "[action 1]" in content
+    assert "thought: Inspect the implementation." in content
+    assert "action: read_file src/products.py" in content
+    assert "action_input" not in content
+
+
+def test_trace_action_records_finish_patch_separately(monkeypatch, tmp_path: Path) -> None:
+    log_path = tmp_path / "agent_trace.log"
+    monkeypatch.setattr(traces, "LOG_PATH", log_path)
+
+    traces.clear_trace()
+    traces.trace_action(
+        ToolRequest(
+            thought="Apply the fix.",
+            name="finish",
+            args="--- a/file.py\n+++ b/file.py",
+        )
+    )
+
+    content = log_path.read_text(encoding="utf-8")
+
+    assert "action: finish\n" in content
+    assert "patch:\n--- a/file.py\n+++ b/file.py" in content
 
 
 def test_trace_run_summary_records_total_tokens_and_elapsed_time(monkeypatch, tmp_path: Path) -> None:
