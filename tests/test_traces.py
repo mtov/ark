@@ -88,7 +88,7 @@ def test_trace_action_records_edit_details_separately(monkeypatch, tmp_path: Pat
 
     content = log_path.read_text(encoding="utf-8")
 
-    assert "action: edit_file path: file.py" in content
+    assert "action: edit_file file.py" in content
     assert "edit:\npath: file.py" in content
 
 

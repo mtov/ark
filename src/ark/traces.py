@@ -50,11 +50,22 @@ def trace_validation_error(reason: str, response: str) -> None:
     )
 
 
+def _edit_path(action_input: str) -> str | None:
+    for line in action_input.splitlines():
+        if line.startswith("path:"):
+            return line.removeprefix("path:").strip() or None
+    return None
+
+
 def trace_action(tool_request: ToolRequest) -> None:
     args = tool_request.args.strip()
     action = tool_request.name
     if action == "list_files":
         action = f"{action} {args or '.'}"
+    elif action == "edit_file":
+        path = _edit_path(args)
+        if path is not None:
+            action = f"{action} {path}"
     elif args and tool_request.name != "finish":
         action = f"{action} {args}"
 
