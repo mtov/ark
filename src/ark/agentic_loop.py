@@ -78,6 +78,36 @@ def get_next_tool_request(config: AgentConfig, memory: Memory) -> ToolRequest:
     return tool_request
 
 
+def handle_finish(
+    config: AgentConfig,
+    memory: Memory,
+    iteration: int,
+    tool_request: ToolRequest,
+    tools_called: list[str],
+) -> str | None:
+    finish_result = apply_finish(config, tool_request)
+    print_iteration_action(iteration, tool_request)
+
+    if finish_result.status == "invalid_finish":
+        memory.append(
+            iteration,
+            tool_request,
+            "Finish action must have an empty Action Input.",
+        )
+        return None
+
+    tools_called.append("run_tests")
+    if finish_result.status == "post_apply_tests_failed":
+        memory.append(
+            iteration,
+            tool_request,
+            summarize_test_failure_output(finish_result.test_output or ""),
+        )
+        return None
+
+    return FINISH_SUCCESS_MESSAGE
+
+
 def agentic_loop(config: AgentConfig) -> LoopResult:
     try:
         memory = Memory()
@@ -88,29 +118,19 @@ def agentic_loop(config: AgentConfig) -> LoopResult:
             tools_called.append(tool_request.name)
 
             if tool_request.name == "finish":
-                finish_result = apply_finish(config, tool_request)
-                print_iteration_action(iteration, tool_request)
-
-                if finish_result.status == "invalid_finish":
-                    memory.append(
-                        iteration,
-                        tool_request,
-                        "Finish action must have an empty Action Input.",
-                    )
-                    continue
-
-                tools_called.append("run_tests")
-                if finish_result.status == "post_apply_tests_failed":
-                    memory.append(
-                        iteration,
-                        tool_request,
-                        summarize_test_failure_output(finish_result.test_output or ""),
-                    )
+                finish_output = handle_finish(
+                    config,
+                    memory,
+                    iteration,
+                    tool_request,
+                    tools_called,
+                )
+                if finish_output is None:
                     continue
 
                 commit_workspace_transaction(config)
                 return LoopResult.success(
-                    FINISH_SUCCESS_MESSAGE,
+                    finish_output,
                     tools_called=tools_called,
                 )
 
