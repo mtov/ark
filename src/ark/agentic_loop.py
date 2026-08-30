@@ -4,8 +4,8 @@ from dataclasses import dataclass, field
 from time import perf_counter
 
 from .cli_output import (
-    format_failure_message,
     print_elapsed_time,
+    print_failure_summary,
     print_final_result,
     print_iteration_action,
     print_total_tokens,
@@ -139,18 +139,17 @@ def main() -> int:
             rollback_workspace_transaction(config)
         elapsed_seconds = perf_counter() - start_time
         trace_run_summary(elapsed_seconds, [])
-        print_total_tokens()
-        print_elapsed_time(elapsed_seconds)
-        print(format_failure_message(exc))
+        print_failure_summary(exc, elapsed_seconds)
         return 1
 
     elapsed_seconds = perf_counter() - start_time
 
     if loop_result.status != "success":
         trace_run_summary(elapsed_seconds, loop_result.tools_called)
-        print_total_tokens()
-        print_elapsed_time(elapsed_seconds)
-        print(format_failure_message(ValueError(loop_result.error or "Unknown error.")))
+        print_failure_summary(
+            ValueError(loop_result.error or "Unknown error."),
+            elapsed_seconds,
+        )
         return 1
 
     trace_run_summary(elapsed_seconds, loop_result.tools_called)

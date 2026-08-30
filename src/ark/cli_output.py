@@ -60,5 +60,11 @@ def format_failure_message(error: Exception) -> str:
     return f"Ark result: failed. {error}"
 
 
+def print_failure_summary(error: Exception, elapsed_seconds: float) -> None:
+    print_total_tokens()
+    print_elapsed_time(elapsed_seconds)
+    print(format_failure_message(error))
+
+
 def print_final_result(result: str) -> None:
     print(format_success_message(result))
