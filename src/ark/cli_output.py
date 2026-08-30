@@ -66,5 +66,11 @@ def print_failure_summary(error: Exception, elapsed_seconds: float) -> None:
     print(format_failure_message(error))
 
 
+def print_success_summary(result: str, elapsed_seconds: float) -> None:
+    print_total_tokens()
+    print_elapsed_time(elapsed_seconds)
+    print_final_result(result)
+
+
 def print_final_result(result: str) -> None:
     print(format_success_message(result))

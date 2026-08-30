@@ -4,11 +4,9 @@ from dataclasses import dataclass, field
 from time import perf_counter
 
 from .cli_output import (
-    print_elapsed_time,
     print_failure_summary,
-    print_final_result,
     print_iteration_action,
-    print_total_tokens,
+    print_success_summary,
 )
 from .finish_handler import apply_finish
 from .inputs import (
@@ -173,7 +171,5 @@ def main() -> int:
         return 1
 
     trace_run_summary(elapsed_seconds, loop_result.tools_called)
-    print_total_tokens()
-    print_elapsed_time(elapsed_seconds)
-    print_final_result(loop_result.output or "")
+    print_success_summary(loop_result.output or "", elapsed_seconds)
     return 0
