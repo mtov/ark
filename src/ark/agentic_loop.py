@@ -76,7 +76,6 @@ class LoopResult:
 @dataclass
 class FinishResult:
     output: str
-    tools_called: list[str]
 
 
 @dataclass
@@ -181,14 +180,15 @@ def handle_finish(
     memory: Memory,
     iteration: int,
     tool_request: ToolRequest,
+    tools_called: list[str],
 ) -> FinishResult | None:
     finish_result = apply_finish(config, tool_request)
-    finish_tools_called = finish_result.tools_called or []
     print_iteration_action(iteration, tool_request)
     if finish_result.status == "invalid_finish":
         memory.append(iteration, tool_request, "Finish action must have an empty Action Input.")
         return None
 
+    tools_called.append("run_tests")
     if finish_result.status == "post_apply_tests_failed":
         memory.append(
             iteration,
@@ -197,39 +197,35 @@ def handle_finish(
         )
         return None
 
-    return FinishResult(output=FINISH_SUCCESS_MESSAGE, tools_called=finish_tools_called)
-
-def _run_agentic_loop(config: AgentConfig) -> LoopResult:
-    memory = Memory()
-    tools_called: list[str] = []
-
-    for iteration in range(1, MAX_ITERATIONS + 1):
-        tool_request = get_next_tool_request(config, memory)
-        tools_called.append(tool_request.name)
-
-        if tool_request.name == "finish":
-            finish_output = handle_finish(config, memory, iteration, tool_request)
-            if finish_output is None:
-                continue
-            commit_workspace_transaction(config)
-            return LoopResult.success(
-                finish_output.output,
-                post_apply_tests_passed=True,
-                tools_called=tools_called + finish_output.tools_called,
-            )
-
-        previous_request = memory.last_tool_request()
-        result, note = run_tool_with_status(tool_request, config, previous_request)
-        print_iteration_action(iteration, tool_request, note)
-        memory.append(iteration, tool_request, result)
-
-    rollback_workspace_transaction(config)
-    return LoopResult.max_iterations_reached(tools_called=tools_called)
-
+    return FinishResult(output=FINISH_SUCCESS_MESSAGE)
 
 def agentic_loop(config: AgentConfig) -> LoopResult:
     try:
-        return _run_agentic_loop(config)
+        memory = Memory()
+        tools_called: list[str] = []
+
+        for iteration in range(1, MAX_ITERATIONS + 1):
+            tool_request = get_next_tool_request(config, memory)
+            tools_called.append(tool_request.name)
+
+            if tool_request.name == "finish":
+                finish_output = handle_finish(config, memory, iteration, tool_request, tools_called)
+                if finish_output is None:
+                    continue
+                commit_workspace_transaction(config)
+                return LoopResult.success(
+                    finish_output.output,
+                    post_apply_tests_passed=True,
+                    tools_called=tools_called,
+                )
+
+            previous_request = memory.last_tool_request()
+            result, note = run_tool_with_status(tool_request, config, previous_request)
+            print_iteration_action(iteration, tool_request, note)
+            memory.append(iteration, tool_request, result)
+
+        rollback_workspace_transaction(config)
+        return LoopResult.max_iterations_reached(tools_called=tools_called)
     except Exception:
         rollback_workspace_transaction(config)
         raise

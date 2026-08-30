@@ -33,8 +33,8 @@ def test_finish_retries_after_failed_tests_without_resetting_workspace(monkeypat
 
     def finish(_config: AgentConfig, _request: ToolRequest) -> ApplyFinishResult:
         if attempts == 1:
-            return ApplyFinishResult("post_apply_tests_failed", "1 failed", ["run_tests"])
-        return ApplyFinishResult("completed", tools_called=["run_tests"])
+            return ApplyFinishResult("post_apply_tests_failed", "1 failed")
+        return ApplyFinishResult("completed")
 
     monkeypatch.setattr("ark.agentic_loop.get_next_tool_request", next_request)
     monkeypatch.setattr("ark.agentic_loop.apply_finish", finish)
@@ -43,7 +43,7 @@ def test_finish_retries_after_failed_tests_without_resetting_workspace(monkeypat
 
     assert result.status == "success"
     assert result.output == FINISH_SUCCESS_MESSAGE
-    assert result.tools_called == ["finish", "finish", "run_tests"]
+    assert result.tools_called == ["finish", "run_tests", "finish", "run_tests"]
     assert "approved edits remain in the workspace" in seen_histories[1]
 
 
@@ -61,7 +61,7 @@ def test_approved_edit_is_kept_after_successful_finish(monkeypatch, tmp_path: Pa
     ])
     monkeypatch.setattr("builtins.input", lambda _prompt: "y")
     monkeypatch.setattr("ark.agentic_loop.get_next_tool_request", lambda _config, _memory: next(responses))
-    monkeypatch.setattr("ark.agentic_loop.apply_finish", lambda *_args: ApplyFinishResult("completed", tools_called=["run_tests"]))
+    monkeypatch.setattr("ark.agentic_loop.apply_finish", lambda *_args: ApplyFinishResult("completed"))
 
     result = agentic_loop(context)
 
@@ -105,7 +105,7 @@ def test_redundant_consecutive_read_is_still_skipped(monkeypatch, tmp_path: Path
         ToolRequest("done", "finish", ""),
     ])
     monkeypatch.setattr("ark.agentic_loop.get_next_tool_request", lambda _config, _memory: next(responses))
-    monkeypatch.setattr("ark.agentic_loop.apply_finish", lambda *_args: ApplyFinishResult("completed", tools_called=["run_tests"]))
+    monkeypatch.setattr("ark.agentic_loop.apply_finish", lambda *_args: ApplyFinishResult("completed"))
 
     result = agentic_loop(context)
 

@@ -26,7 +26,6 @@ def test_finish_runs_final_tests(monkeypatch, tmp_path: Path) -> None:
     result = apply_finish(build_context(tmp_path), ToolRequest("done", "finish", ""))
 
     assert result.status == "completed"
-    assert result.tools_called == ["run_tests"]
     assert events == [("completed", "finish")]
 
 
@@ -37,7 +36,6 @@ def test_finish_returns_failed_tests_without_reverting_edits(monkeypatch, tmp_pa
 
     assert result.status == "post_apply_tests_failed"
     assert result.test_output == "1 failed"
-    assert result.tools_called == ["run_tests"]
 
 
 def test_finish_rejects_nonempty_input(tmp_path: Path) -> None:

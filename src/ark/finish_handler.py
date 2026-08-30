@@ -14,7 +14,6 @@ INVALID_FINISH_MESSAGE = "Finish action must have an empty Action Input."
 class ApplyFinishResult:
     status: str
     test_output: str | None = None
-    tools_called: list[str] | None = None
 
 
 def apply_finish(
@@ -35,11 +34,7 @@ def apply_finish(
         return ApplyFinishResult(
             status="post_apply_tests_failed",
             test_output=test_output,
-            tools_called=["run_tests"],
         )
 
     trace_finish_event("completed", "finish")
-    return ApplyFinishResult(
-        status="completed",
-        tools_called=["run_tests"],
-    )
+    return ApplyFinishResult(status="completed")
