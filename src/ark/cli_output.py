@@ -2,13 +2,9 @@ from __future__ import annotations
 
 from math import floor
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from .protocol import ToolRequest
 from .traces import get_total_tokens
-
-if TYPE_CHECKING:
-    from .agentic_loop import LoopResult
 
 
 def format_iteration_action(tool_request: ToolRequest) -> str:
@@ -52,7 +48,7 @@ def print_elapsed_time(elapsed_seconds: float) -> None:
     print(format_elapsed_time(elapsed_seconds))
 
 
-def format_success_message(result: str, loop_result: LoopResult) -> str:
+def format_success_message(result: str) -> str:
     normalized_result = result.strip()
     if not normalized_result:
         return "Ark result: success."
@@ -64,5 +60,5 @@ def format_failure_message(error: Exception) -> str:
     return f"Ark result: failed. {error}"
 
 
-def print_final_result(result: str, loop_result: LoopResult) -> None:
-    print(format_success_message(result, loop_result))
+def print_final_result(result: str) -> None:
+    print(format_success_message(result))

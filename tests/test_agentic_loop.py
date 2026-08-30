@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ark.agentic_loop import FINISH_SUCCESS_MESSAGE, MAX_ITERATIONS_REACHED_MESSAGE, Memory, agentic_loop
+from ark.agentic_loop import FINISH_SUCCESS_MESSAGE, MAX_ITERATIONS_REACHED_MESSAGE, agentic_loop
 from ark.finish_handler import ApplyFinishResult
 from ark.inputs import AgentConfig
+from ark.memory import Memory
 from ark.models import ModelConfig
 from ark.protocol import ToolRequest
 

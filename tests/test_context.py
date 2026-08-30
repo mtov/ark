@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from ark.agentic_loop import MAX_HISTORY_ENTRIES, MAX_OBSERVATION_CHARS, Memory
+from ark.memory import MAX_HISTORY_ENTRIES, MAX_OBSERVATION_CHARS, Memory
 from ark.protocol import ToolRequest
 
 
