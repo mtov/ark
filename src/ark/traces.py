@@ -63,8 +63,8 @@ def trace_action(tool_request: ToolRequest) -> None:
         f"thought: {tool_request.thought}\n"
         f"action: {action}\n"
     )
-    if tool_request.name == "finish" and args:
-        trace += f"patch:\n{args}\n"
+    if tool_request.name == "edit_file" and args:
+        trace += f"edit:\n{args}\n"
     _append_trace(f"{trace}\n")
 
 
@@ -76,21 +76,15 @@ def trace_repair_attempt(repair_kind: str, reason: str) -> None:
     )
 
 
-def trace_command_event(
+def trace_edit_event(
     status: str,
-    command: str,
-    cwd: Path,
-    exit_code: int | None = None,
+    path: str,
+    diff: str | None = None,
     detail: str | None = None,
 ) -> None:
-    trace = (
-        "[command]\n"
-        f"status: {status}\n"
-        f"command: {command}\n"
-        f"cwd: {cwd}\n"
-    )
-    if exit_code is not None:
-        trace += f"exit_code: {exit_code}\n"
+    trace = f"[edit_file]\nstatus: {status}\npath: {path}\n"
+    if diff:
+        trace += f"diff:\n{diff}\n"
     if detail:
         trace += f"detail: {detail}\n"
     _append_trace(f"{trace}\n")

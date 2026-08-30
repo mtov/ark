@@ -17,9 +17,9 @@ It focuses on one narrow workflow:
 1. load a workspace
 2. copy it to an internal runtime directory
 3. let a model inspect files and run tests
-4. require the model to finish with a unified diff patch
-5. ask the user for approval before applying that patch
-6. run tests again after patch application before accepting the run
+4. let the model propose precise file edits
+5. ask the user for approval before applying each edit
+6. run final tests when the model finishes
 
 The project is meant for learning, experimentation, and research rather than broad production automation.
 
@@ -55,9 +55,9 @@ What you should expect during a run:
 - Ark prints the selected model and the loaded `prompt.txt`
 - it creates or refreshes `./ark-workspace`
 - the model chooses among a small set of tools
-- if the model finishes with a patch, Ark prints the patch and asks for approval before running `git apply`
-- after patch application, Ark runs tests automatically before reporting success
-- if post-apply tests fail, Ark resets `./ark-workspace` and asks the model for a different patch
+- each proposed file edit is shown as a diff and requires approval
+- `finish` runs final tests before reporting success
+- if final tests fail, approved edits remain available for the model to correct
 - when the run ends, Ark prints the final status, total token usage, and elapsed time
 
 ## Configuration
@@ -101,7 +101,7 @@ Ark runs against a workspace directory passed on the command line.
 Each workspace should contain:
 
 - `prompt.txt`
-- the project files the agent may inspect or patch
+- the project files the agent may inspect or edit
 - the tests the agent may run
 
 It may also contain:
@@ -139,13 +139,13 @@ python -m pytest -q
 ```
 
 Ark itself uses a fixed test command based on `python -m pytest -q -p no:cacheprovider` and does not allow arbitrary shell commands for testing.
-When Ark prepares `ark-workspace`, it currently excludes `evaluation/`, so post-apply validation runs only against the copied workspace files that remain available there, typically `tests/`.
+When Ark prepares `ark-workspace`, it currently excludes `evaluation/`, so final validation runs only against the copied workspace files that remain available there, typically `tests/`.
 
 ## Runtime Workspace
 
 For each run, Ark copies the selected workspace into a fixed internal directory named `ark-workspace`.
 The original workspace is preserved.
-All reads, test runs, patch validation, and patch application happen only inside `ark-workspace`.
+All reads, edits, and test runs happen only inside `ark-workspace`.
 During this copy, Ark currently skips directories such as `evaluation/`, so the runtime workspace is intentionally narrower than the original source workspace when hidden or external evaluation assets are present.
 
 This gives Ark a predictable temporary working area with a stable path across runs.
@@ -155,7 +155,7 @@ This has a few important consequences:
 
 - the source workspace is treated as input only
 - all tool actions are constrained to `ark-workspace`
-- patch validation and patch application happen only in the copied workspace
+- approved edits happen only in the copied workspace
 - the runtime workspace is disposable and is recreated on the next run
 
 ## Example Workspaces
@@ -173,42 +173,14 @@ These workspaces are designed so that:
 - bugfix tasks start from failing behavior and are validated by tests
 - feature tasks start from missing behavior and are validated by tests
 - refactor tasks start from passing behavior and require coordinated updates to code and tests
-- the changes can be expressed as a patch
+- the changes can be expressed as precise file replacements
 - the examples stay practical and close to realistic maintenance tasks
 
-## Patch Workflow
+## Edit Workflow
 
-When Ark finishes a task, it expects a unified diff patch.
-That patch is saved to `ark-workspace/patch.txt`.
+The model changes an existing file with `edit_file`, specifying a path and an exact `old` to `new` replacement. Ark verifies that the old block appears exactly once, calculates a unified diff internally, and asks the user for approval before writing the file.
 
-Before applying the patch, Ark:
-
-1. validates the patch structure
-2. attempts lightweight automatic repair for common diff formatting issues
-3. prints the exact command that will run
-4. prints the full patch as a command preview
-5. asks the user for approval
-
-If the user approves, Ark runs `git apply patch.txt` inside `ark-workspace`.
-
-After the patch is applied, Ark also runs tests automatically.
-If the post-apply test run does not pass, the runtime workspace is reset to the original source state and the model must try again with a different patch.
-If the model tries to `finish` without returning a unified diff patch, that finish is rejected and the run continues.
-
-The patch helper also normalizes a few common formatting problems before validation, such as:
-
-- fenced code block wrappers around the diff
-- patch text that includes extra explanation above the first diff header
-- malformed hunk body lines that are missing a unified diff prefix
-- stale hunk counts that can be recalculated automatically
-
-Manual validation:
-
-```bash
-cd ./ark-workspace
-git apply --check patch.txt
-git apply patch.txt
-```
+Approved edits remain in the runtime workspace throughout the run. When the model sends `finish` with an empty input, Ark runs the final test command. A test failure is returned to the model so it can make a corrective edit; it does not discard the existing edits. If the run reaches its iteration limit or fails unexpectedly, Ark restores the workspace snapshot created before the first approved edit.
 
 ## How One Run Works
 
@@ -218,8 +190,8 @@ git apply patch.txt
 4. Ark loads `prompt.txt` and optional `AGENTS.md` from the copied workspace and builds the user-side workspace context.
 5. `agentic_loop.py` asks the configured model for the next action.
 6. `tools.py` executes the selected tool inside `ark-workspace`.
-7. When the model returns `finish`, `finish_handler.py` validates the output and routes patch application through `patches.py`.
-8. If a patch is approved and applied, Ark runs post-apply tests before accepting the run.
+7. When the model returns `finish`, `finish_handler.py` runs the final tests.
+8. If they pass, Ark keeps the approved edits and accepts the run.
 
 ```mermaid
 sequenceDiagram
@@ -231,7 +203,8 @@ sequenceDiagram
     Model-->>AgentLoop: Thought / Action / Action Input
     AgentLoop->>Workspace: run tool
     Workspace-->>AgentLoop: tool result
-    AgentLoop->>Workspace: save and apply patch on finish
+    AgentLoop->>Workspace: preview and apply approved edit_file request
+    AgentLoop->>Workspace: run final tests on finish
 ```
 
 ## Architecture
@@ -241,7 +214,7 @@ flowchart LR
     A["Setup and Config<br/>inputs.py"] --> B["Agent Loop and Memory<br/>agentic_loop.py"]
     B --> C["Model Protocol<br/>models.py + protocol.py"]
     B --> D["Tools<br/>tools.py + guards.py"]
-    B --> E["Patch<br/>finish_handler.py + patches.py + test_failures.py"]
+    B --> E["Editing and Finish<br/>tools.py + finish_handler.py + test_failures.py"]
     A --> D
     C --> F["Observability<br/>cli_output.py + traces.py"]
     D --> F
@@ -260,10 +233,10 @@ The codebase is intentionally small and can be read as six main modules:
 - `Tools`
   - `src/ark/tools.py`: implements the available workspace-safe tools
   - `src/ark/guards.py`: validates safe paths and keeps tool access constrained to the runtime workspace
-- `Patch`
-  - `src/ark/finish_handler.py`: validates `finish` outputs, defines `FinishResult`, and orchestrates patch apply plus verification
-  - `src/ark/patches.py`: saves, repairs, previews, validates, and applies unified diff patches
-  - `src/ark/test_failures.py`: summarizes post-apply test failures for retry prompts
+- `Editing and Finish`
+  - `src/ark/tools.py`: validates, previews, approves, and applies `edit_file` requests
+  - `src/ark/finish_handler.py`: validates empty `finish` inputs and runs final tests
+  - `src/ark/test_failures.py`: summarizes final test failures for retry prompts
 - `Observability`
   - `src/ark/cli_output.py`: formats iteration lines, final status messages, and elapsed time
   - `src/ark/traces.py`: writes execution traces and related debug artifacts such as `agent_trace.log`
@@ -284,6 +257,7 @@ Available actions:
 - `read_file`
 - `find_text`
 - `run_tests`
+- `edit_file`
 - `finish`
 
 Behavior notes:
@@ -292,7 +266,8 @@ Behavior notes:
 - `find_text` expects `search text | relative/or-known/workspace/path`
 - `find_text` shows the searched string in the iteration line, such as `[4] find_text "coupon"`
 - `run_tests` uses a fixed `pytest` command instead of an arbitrary shell command
-- `finish` must return a unified diff patch in `Action Input`
+- `edit_file` replaces one exact `old` block with a `new` block after user approval
+- `finish` must have an empty `Action Input`
 
 The model responds using:
 
@@ -316,7 +291,7 @@ It uses short section headers such as:
 - `[repair_response N]`
 - `[validation_error]`
 - `[repair_attempt]`
-- `[command]`
+- `[edit_file]`
 - `[finish]`
 - `[run_summary]`
 
@@ -324,14 +299,14 @@ The final `[run_summary]` block records:
 
 - `total_tokens`: cumulative token usage reported across model calls, when available
 - `elapsed_seconds`: total wall-clock time for the run
-- `tools_called`: the ordered list of tool names used during the run, including internal steps such as `apply_patch` and post-apply `run_tests`
+- `tools_called`: the ordered list of tool names used during the run, including final `run_tests`
 
 ## Security and Limits
 
 - Ark never modifies the original input workspace
 - file and directory tool paths are restricted to `ark-workspace`
 - `run_tests` uses a fixed command, not arbitrary shell execution
-- patch application requires explicit user approval
+- each file edit requires explicit user approval
 - the project assumes cooperative local execution and does not try to provide OS-level sandboxing
 - this is a lightweight local safety model, not a full sandbox
 
@@ -348,7 +323,7 @@ It does not try to be:
 Instead, it is a compact reference implementation for studying:
 
 - agent loops over a small tool API
-- patch-based code modification
+- exact-match code modification
 - approval before mutation
-- post-apply validation with tests
+- final validation with tests
 - curated workspace tasks in a small, practical setup

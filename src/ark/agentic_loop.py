@@ -11,10 +11,15 @@ from .cli_output import (
     print_total_tokens,
 )
 from .finish_handler import apply_finish
-from .inputs import AgentConfig, parse_args, prepare_run, reset_runtime_workspace
+from .inputs import (
+    AgentConfig,
+    commit_workspace_transaction,
+    parse_args,
+    prepare_run,
+    rollback_workspace_transaction,
+)
 from .models import call_model
-from .patches import looks_like_full_file_response
-from .protocol import ToolRequest, looks_like_patch, parse_response, repair_response
+from .protocol import ToolRequest, parse_response, repair_response
 from .test_failures import summarize_test_failure_output
 from .tools import REDUNDANT_READ_FILE_MESSAGE, run_tool_with_status
 from .traces import trace_action, trace_run_summary, trace_validation_error
@@ -22,30 +27,8 @@ from .traces import trace_action, trace_run_summary, trace_validation_error
 MAX_HISTORY_ENTRIES = 4
 MAX_OBSERVATION_CHARS = 1200
 MAX_ITERATIONS_REACHED_MESSAGE = "Agent stopped after reaching the maximum number of steps."
-INVALID_FINISH_MESSAGE = (
-    "Finish output must contain only a unified diff patch. "
-    "If patch validation keeps failing, you may instead return one or more complete files using "
-    "FILE: path followed by triple-backtick content blocks. "
-    "Do not end the run yet; inspect any remaining files you need and then return the patch."
-)
-PATCH_FAILURE_MESSAGE_PREFIX = (
-    "Patch validation failed. Use the error below to produce a corrected patch.\n\n"
-)
-FULL_FILE_REQUIRED_MESSAGE = (
-    "Patch validation failed multiple times. "
-    "Your next finish response must use complete file contents with FILE: sections and triple-backtick blocks. "
-    "Do not return another unified diff."
-)
-FULL_FILE_FALLBACK_MESSAGE = (
-    "\n\nIf the patch keeps failing, you may instead return complete file contents in this format:\n\n"
-    "FILE: src/example.py\n"
-    "```python\n"
-    "def example():\n"
-    "    return 1\n"
-    "```\n\n"
-    "Repeat one FILE block per modified file."
-)
 MAX_ITERATIONS = 15
+FINISH_SUCCESS_MESSAGE = "Changes applied and final tests passed."
 
 
 @dataclass
@@ -124,14 +107,6 @@ class Memory:
             return None
         return self.entries[-1].tool_request
 
-    def count_patch_validation_failures(self) -> int:
-        return sum(
-            1
-            for entry in self.entries
-            if entry.tool_request.name == "finish"
-            and entry.result.startswith(PATCH_FAILURE_MESSAGE_PREFIX)
-        )
-
     def _unique_tool_args(self, name: str) -> list[str]:
         seen: set[str] = set()
         items: list[str] = []
@@ -201,65 +176,30 @@ def get_next_tool_request(config: AgentConfig, memory: Memory) -> ToolRequest:
     return tool_request
 
 
-def handle_post_apply_test_failure(
-    config: AgentConfig,
-    memory: Memory,
-    iteration: int,
-    tool_request: ToolRequest,
-    test_output: str | None,
-) -> None:
-    print_iteration_action(iteration, tool_request)
-    reset_runtime_workspace(config)
-    memory.append(
-        iteration,
-        tool_request,
-        summarize_test_failure_output(test_output or ""),
-    )
-
-
-def summarize_patch_failure(error: Exception) -> str:
-    return PATCH_FAILURE_MESSAGE_PREFIX + str(error) + FULL_FILE_FALLBACK_MESSAGE
-
-
 def handle_finish(
     config: AgentConfig,
     memory: Memory,
     iteration: int,
     tool_request: ToolRequest,
 ) -> FinishResult | None:
-    if memory.count_patch_validation_failures() >= 2 and looks_like_patch(tool_request.args):
-        print_iteration_action(iteration, tool_request)
-        memory.append(iteration, tool_request, FULL_FILE_REQUIRED_MESSAGE)
-        return None
-
-    if not looks_like_patch(tool_request.args) and not looks_like_full_file_response(tool_request.args):
-        print_iteration_action(iteration, tool_request)
-        memory.append(iteration, tool_request, INVALID_FINISH_MESSAGE)
-        return None
-
-    try:
-        finish_result = apply_finish(config, tool_request)
-    except ValueError as exc:
-        print_iteration_action(iteration, tool_request)
-        memory.append(iteration, tool_request, summarize_patch_failure(exc))
-        return None
-
+    finish_result = apply_finish(config, tool_request)
     finish_tools_called = finish_result.tools_called or []
+    print_iteration_action(iteration, tool_request)
+    if finish_result.status == "invalid_finish":
+        memory.append(iteration, tool_request, "Finish action must have an empty Action Input.")
+        return None
+
     if finish_result.status == "post_apply_tests_failed":
-        handle_post_apply_test_failure(
-            config,
-            memory,
+        memory.append(
             iteration,
             tool_request,
-            finish_result.test_output,
+            summarize_test_failure_output(finish_result.test_output or ""),
         )
         return None
 
-    tool_request = finish_result.request
-    print_iteration_action(iteration, tool_request)
-    return FinishResult(output=tool_request.args, tools_called=finish_tools_called)
+    return FinishResult(output=FINISH_SUCCESS_MESSAGE, tools_called=finish_tools_called)
 
-def agentic_loop(config: AgentConfig) -> LoopResult:
+def _run_agentic_loop(config: AgentConfig) -> LoopResult:
     memory = Memory()
     tools_called: list[str] = []
 
@@ -271,6 +211,7 @@ def agentic_loop(config: AgentConfig) -> LoopResult:
             finish_output = handle_finish(config, memory, iteration, tool_request)
             if finish_output is None:
                 continue
+            commit_workspace_transaction(config)
             return LoopResult.success(
                 finish_output.output,
                 post_apply_tests_passed=True,
@@ -282,17 +223,29 @@ def agentic_loop(config: AgentConfig) -> LoopResult:
         print_iteration_action(iteration, tool_request, note)
         memory.append(iteration, tool_request, result)
 
+    rollback_workspace_transaction(config)
     return LoopResult.max_iterations_reached(tools_called=tools_called)
+
+
+def agentic_loop(config: AgentConfig) -> LoopResult:
+    try:
+        return _run_agentic_loop(config)
+    except Exception:
+        rollback_workspace_transaction(config)
+        raise
 
 
 def main() -> int:
     args = parse_args()
     start_time = perf_counter()
+    config: AgentConfig | None = None
 
     try:
         config = prepare_run(args.workspace_path)
         loop_result = agentic_loop(config)
     except Exception as exc:  # noqa: BLE001
+        if config is not None:
+            rollback_workspace_transaction(config)
         elapsed_seconds = perf_counter() - start_time
         trace_run_summary(elapsed_seconds, [])
         print_total_tokens()

@@ -40,35 +40,14 @@ def test_trace_finish_event_records_stage_and_detail(monkeypatch, tmp_path: Path
     monkeypatch.setattr(traces, "LOG_PATH", log_path)
 
     traces.clear_trace()
-    traces.trace_finish_event("failed", "patch_validation", "corrupt patch")
+    traces.trace_finish_event("failed", "finish_validation", "unexpected input")
 
     content = log_path.read_text(encoding="utf-8")
 
     assert "[finish]" in content
     assert "status: failed" in content
-    assert "stage: patch_validation" in content
-    assert "detail: corrupt patch" in content
-
-
-def test_trace_command_event_records_result_details(monkeypatch, tmp_path: Path) -> None:
-    log_path = tmp_path / "agent_trace.log"
-    monkeypatch.setattr(traces, "LOG_PATH", log_path)
-
-    traces.clear_trace()
-    traces.trace_command_event(
-        "failed",
-        "git apply patch.txt",
-        tmp_path,
-        exit_code=1,
-        detail="patch does not apply",
-    )
-
-    content = log_path.read_text(encoding="utf-8")
-
-    assert "[command]" in content
-    assert "status: failed" in content
-    assert "exit_code: 1" in content
-    assert "detail: patch does not apply" in content
+    assert "stage: finish_validation" in content
+    assert "detail: unexpected input" in content
 
 
 def test_trace_action_uses_one_line_for_action_and_arguments(monkeypatch, tmp_path: Path) -> None:
@@ -93,7 +72,7 @@ def test_trace_action_uses_one_line_for_action_and_arguments(monkeypatch, tmp_pa
     assert "action_input" not in content
 
 
-def test_trace_action_records_finish_patch_separately(monkeypatch, tmp_path: Path) -> None:
+def test_trace_action_records_edit_details_separately(monkeypatch, tmp_path: Path) -> None:
     log_path = tmp_path / "agent_trace.log"
     monkeypatch.setattr(traces, "LOG_PATH", log_path)
 
@@ -101,16 +80,16 @@ def test_trace_action_records_finish_patch_separately(monkeypatch, tmp_path: Pat
     traces.record_response_usage()
     traces.trace_action(
         ToolRequest(
-            thought="Apply the fix.",
-            name="finish",
-            args="--- a/file.py\n+++ b/file.py",
+            thought="Edit the file.",
+            name="edit_file",
+            args="path: file.py\nold:\n```\nold\n```\nnew:\n```\nnew\n```",
         )
     )
 
     content = log_path.read_text(encoding="utf-8")
 
-    assert "action: finish\n" in content
-    assert "patch:\n--- a/file.py\n+++ b/file.py" in content
+    assert "action: edit_file path: file.py" in content
+    assert "edit:\npath: file.py" in content
 
 
 def test_trace_run_summary_records_total_tokens_and_elapsed_time(monkeypatch, tmp_path: Path) -> None:
@@ -121,11 +100,11 @@ def test_trace_run_summary_records_total_tokens_and_elapsed_time(monkeypatch, tm
     traces.record_response_usage(
         token_usage=TokenUsage(input_tokens=2, output_tokens=3, total_tokens=5),
     )
-    traces.trace_run_summary(12.345, ["list_files", "read_file", "finish", "apply_patch", "run_tests"])
+    traces.trace_run_summary(12.345, ["list_files", "read_file", "edit_file", "finish", "run_tests"])
 
     content = log_path.read_text(encoding="utf-8")
 
     assert "[run_summary]" in content
     assert "total_tokens: 5" in content
     assert "elapsed_seconds: 12.35" in content
-    assert "tools_called: list_files, read_file, finish, apply_patch, run_tests" in content
+    assert "tools_called: list_files, read_file, edit_file, finish, run_tests" in content

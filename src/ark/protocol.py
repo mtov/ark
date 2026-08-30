@@ -17,6 +17,13 @@ class ToolRequest:
     name: str
     args: str
 
+
+@dataclass(frozen=True)
+class EditFileRequest:
+    path: str
+    old: str
+    new: str
+
 REPAIR_PROMPT = (
     "Your previous response was invalid. "
     "Respond using only: "
@@ -25,7 +32,12 @@ REPAIR_PROMPT = (
     "Action Input: ... "
     "Do not include Observation."
 )
-HUNK_HEADER_PATTERN = re.compile(r"^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@")
+EDIT_FILE_PATTERN = re.compile(
+    r"\Apath:\s*(?P<path>[^\n]+)\n"
+    r"old:\s*\n```[^\n]*\n(?P<old>.*?)\n```\n"
+    r"new:\s*\n```[^\n]*\n(?P<new>.*?)\n```\s*\Z",
+    re.DOTALL,
+)
 
 def parse_response(text: str) -> ToolRequest:
     thought = ""
@@ -55,12 +67,18 @@ def parse_response(text: str) -> ToolRequest:
     return ToolRequest(thought=thought, name=action, args=action_input)
 
 
-def looks_like_patch(text: str) -> bool:
-    has_file_headers = "--- " in text and "+++ " in text
-    has_valid_hunk_header = any(
-        HUNK_HEADER_PATTERN.match(line) for line in text.splitlines()
+def parse_edit_file_request(text: str) -> EditFileRequest:
+    match = EDIT_FILE_PATTERN.match(text.strip())
+    if match is None:
+        raise ValueError(
+            "Invalid edit_file input. Use path:, old:, and new: with triple-backtick blocks."
+        )
+
+    return EditFileRequest(
+        path=match.group("path").strip(),
+        old=match.group("old"),
+        new=match.group("new"),
     )
-    return has_file_headers and has_valid_hunk_header
 
 
 def repair_response(config: AgentConfig, user_message: str, reason: str) -> ToolRequest:

@@ -4,7 +4,7 @@ from math import floor
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .protocol import ToolRequest, looks_like_patch
+from .protocol import ToolRequest
 from .traces import get_total_tokens
 
 if TYPE_CHECKING:
@@ -53,11 +53,6 @@ def print_elapsed_time(elapsed_seconds: float) -> None:
 
 
 def format_success_message(result: str, loop_result: LoopResult) -> str:
-    if looks_like_patch(result):
-        if loop_result.post_apply_tests_passed:
-            return "Ark result: success. Patch applied successfully. Post-apply tests passed."
-        return "Ark result: success. Patch applied successfully."
-
     normalized_result = result.strip()
     if not normalized_result:
         return "Ark result: success."

@@ -9,8 +9,8 @@ FAILED_TEST_HEADER = re.compile(r"^_+\s+([A-Za-z0-9_]+)\s+_+$")
 
 def summarize_test_failure_output(test_output: str) -> str:
     summary_lines = [
-        "Post-apply tests failed. The runtime workspace has been reset to the original source state.",
-        "Use the failed test details below to produce a different patch.",
+        "Final tests failed. The approved edits remain in the workspace.",
+        "Use the failed test details below to make a corrective edit.",
     ]
     failed_cases: list[str] = []
     current_test: str | None = None

@@ -3,11 +3,13 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from difflib import unified_diff
 from pathlib import Path
 
 from .guards import resolve_tool_path
-from .inputs import AgentConfig
-from .protocol import ToolRequest
+from .inputs import AgentConfig, create_workspace_snapshot
+from .protocol import ToolRequest, parse_edit_file_request
+from .traces import trace_edit_event
 
 MAX_FIND_TEXT_MATCHES = 20
 SKIPPED_DIRECTORIES = {".git", ".venv", "__pycache__"}
@@ -153,6 +155,65 @@ def run_tests(workspace_path: Path) -> str:
     return output
 
 
+def _build_edit_diff(path: str, old_text: str, new_text: str) -> str:
+    return "".join(
+        unified_diff(
+            old_text.splitlines(keepends=True),
+            new_text.splitlines(keepends=True),
+            fromfile=f"a/{path}",
+            tofile=f"b/{path}",
+        )
+    )
+
+
+def _request_edit_approval(path: str, diff: str) -> bool:
+    print(f"Proposed edit: {path}")
+    print(diff, end="" if diff.endswith("\n") else "\n")
+    return input("Authorize edit? [y/N]: ").strip().lower() in {"y", "yes"}
+
+
+def edit_file(action_input: str, config: AgentConfig) -> str:
+    try:
+        edit = parse_edit_file_request(action_input)
+    except ValueError as exc:
+        trace_edit_event("failed", "<invalid>", detail=str(exc))
+        return str(exc)
+
+    path = _resolve_workspace_target(edit.path, config.workspace_path)
+    if isinstance(path, str):
+        trace_edit_event("failed", edit.path, detail=path)
+        return path
+    if not path.exists():
+        message = f"File not found inside the workspace: {path}"
+        trace_edit_event("failed", edit.path, detail=message)
+        return message
+    if not path.is_file():
+        message = f"Path is not a file: {path}"
+        trace_edit_event("failed", edit.path, detail=message)
+        return message
+
+    current_text = path.read_text(encoding="utf-8")
+    occurrences = current_text.count(edit.old)
+    if occurrences != 1:
+        message = (
+            "edit_file requires old to appear exactly once in the target file; "
+            f"found {occurrences} occurrences."
+        )
+        trace_edit_event("failed", edit.path, detail=message)
+        return message
+
+    updated_text = current_text.replace(edit.old, edit.new, 1)
+    diff = _build_edit_diff(edit.path, current_text, updated_text)
+    if not _request_edit_approval(edit.path, diff):
+        trace_edit_event("rejected", edit.path, diff=diff)
+        return f"Edit rejected by user for {edit.path}."
+
+    create_workspace_snapshot(config)
+    path.write_text(updated_text, encoding="utf-8")
+    trace_edit_event("succeeded", edit.path, diff=diff)
+    return f"Edit applied successfully to {edit.path}."
+
+
 def should_skip_redundant_tool_request(
     request: ToolRequest,
     previous_request: ToolRequest | None = None,
@@ -200,5 +261,7 @@ def run_tool(
         return find_text(request.args, workspace_path)
     if request.name == "run_tests":
         return run_tests(workspace_path)
+    if request.name == "edit_file":
+        return edit_file(request.args, config)
 
-    return f"Unsupported action '{request.name}'. Use list_files, read_file, find_text, run_tests, or finish."
+    return f"Unsupported action '{request.name}'. Use list_files, read_file, find_text, run_tests, edit_file, or finish."

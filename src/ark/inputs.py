@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import shutil
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -25,6 +26,7 @@ class AgentConfig:
     user_prompt: str
     source_workspace_path: Path
     workspace_path: Path
+    snapshot_path: Path | None = None
 
 
 def _read_text_file(
@@ -121,8 +123,32 @@ def prepare_runtime_workspace(source_workspace_path: Path) -> Path:
     return RUNTIME_WORKSPACE_PATH
 
 
-def reset_runtime_workspace(config: AgentConfig) -> None:
-    config.workspace_path = prepare_runtime_workspace(config.source_workspace_path)
+def create_workspace_snapshot(config: AgentConfig) -> None:
+    if config.snapshot_path is not None:
+        return
+
+    snapshot_parent = Path(tempfile.mkdtemp(prefix="ark-workspace-snapshot-"))
+    snapshot_path = snapshot_parent / "workspace"
+    shutil.copytree(config.workspace_path, snapshot_path)
+    config.snapshot_path = snapshot_path
+
+
+def commit_workspace_transaction(config: AgentConfig) -> None:
+    if config.snapshot_path is None:
+        return
+
+    shutil.rmtree(config.snapshot_path.parent)
+    config.snapshot_path = None
+
+
+def rollback_workspace_transaction(config: AgentConfig) -> None:
+    if config.snapshot_path is None:
+        return
+
+    shutil.rmtree(config.workspace_path)
+    shutil.copytree(config.snapshot_path, config.workspace_path)
+    shutil.rmtree(config.snapshot_path.parent)
+    config.snapshot_path = None
 
 
 def load_user_prompt(workspace_path: Path) -> str:
