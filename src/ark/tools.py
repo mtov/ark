@@ -203,6 +203,11 @@ def edit_file(action_input: str, config: AgentConfig) -> str:
         return message
 
     updated_text = current_text.replace(edit.old, edit.new, 1)
+    if updated_text == current_text:
+        message = "edit_file requires new to differ from old."
+        trace_edit_event("failed", edit.path, detail=message)
+        return message
+
     diff = _build_edit_diff(edit.path, current_text, updated_text)
     if not _request_edit_approval(edit.path, diff):
         trace_edit_event("rejected", edit.path, diff=diff)

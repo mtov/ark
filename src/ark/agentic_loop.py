@@ -21,11 +21,12 @@ from .models import call_model
 from .protocol import ToolRequest, parse_response, repair_response
 from .test_failures import summarize_test_failure_output
 from .tools import run_tool_with_status
-from .traces import trace_action, trace_run_summary, trace_validation_error
+from .traces import trace_action, trace_finish_event, trace_run_summary, trace_validation_error
 
 MAX_ITERATIONS_REACHED_MESSAGE = "Agent stopped after reaching the maximum number of steps."
-MAX_ITERATIONS = 15
+MAX_ITERATIONS = 20
 FINISH_SUCCESS_MESSAGE = "Changes applied and final tests passed."
+FINISH_WITHOUT_EDIT_MESSAGE = "Finish requires at least one approved edit_file action."
 
 
 @dataclass
@@ -83,6 +84,12 @@ def handle_finish(
     tool_request: ToolRequest,
     tools_called: list[str],
 ) -> str | None:
+    if not memory.has_successful_edit():
+        print_iteration_action(iteration, tool_request)
+        trace_finish_event("failed", "finish_validation", FINISH_WITHOUT_EDIT_MESSAGE)
+        memory.append(iteration, tool_request, FINISH_WITHOUT_EDIT_MESSAGE)
+        return None
+
     finish_result = apply_finish(config, tool_request)
     print_iteration_action(iteration, tool_request)
 

@@ -62,6 +62,19 @@ def test_edit_file_rejects_ambiguous_old_content(tmp_path: Path) -> None:
     assert file_path.read_text(encoding="utf-8") == "old\nold\n"
 
 
+def test_edit_file_rejects_a_noop_replacement(tmp_path: Path) -> None:
+    file_path = tmp_path / "example.py"
+    file_path.write_text("old\n", encoding="utf-8")
+
+    result = tools.edit_file(
+        "path: example.py\nold:\n```\nold\n```\nnew:\n```\nold\n```",
+        build_context(tmp_path),
+    )
+
+    assert result == "edit_file requires new to differ from old."
+    assert file_path.read_text(encoding="utf-8") == "old\n"
+
+
 def test_edit_file_keeps_file_unchanged_when_rejected(monkeypatch, tmp_path: Path) -> None:
     file_path = tmp_path / "example.py"
     file_path.write_text("old\n", encoding="utf-8")

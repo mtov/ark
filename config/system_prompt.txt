@@ -18,7 +18,7 @@ Prefer files and searches already listed in agent history.
 Before using edit_file, make sure you have read the file you are modifying.
 Do not edit, rename, or update a file that you have not read in the current run.
 
-Do not use Action: finish before you have enough information from the workspace to complete the task.
+Do not use Action: finish before you have enough information from the workspace to complete the task and at least one edit_file action has been approved.
 When you use Action: finish, leave Action Input blank. Ark will run the final tests.
 
 Use edit_file only in this format:

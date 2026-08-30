@@ -2,10 +2,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from ark.agentic_loop import FINISH_SUCCESS_MESSAGE, MAX_ITERATIONS_REACHED_MESSAGE, agentic_loop
+from ark.agentic_loop import (
+    FINISH_SUCCESS_MESSAGE,
+    FINISH_WITHOUT_EDIT_MESSAGE,
+    MAX_ITERATIONS_REACHED_MESSAGE,
+    Memory,
+    agentic_loop,
+    handle_finish,
+)
 from ark.finish_handler import ApplyFinishResult
 from ark.inputs import AgentConfig
-from ark.memory import Memory
 from ark.models import ModelConfig
 from ark.protocol import ToolRequest
 
@@ -39,6 +45,7 @@ def test_finish_retries_after_failed_tests_without_resetting_workspace(monkeypat
 
     monkeypatch.setattr("ark.agentic_loop.get_next_tool_request", next_request)
     monkeypatch.setattr("ark.agentic_loop.apply_finish", finish)
+    monkeypatch.setattr(Memory, "has_successful_edit", lambda _memory: True)
 
     result = agentic_loop(context)
 
@@ -46,6 +53,22 @@ def test_finish_retries_after_failed_tests_without_resetting_workspace(monkeypat
     assert result.output == FINISH_SUCCESS_MESSAGE
     assert result.tools_called == ["finish", "run_tests", "finish", "run_tests"]
     assert "approved edits remain in the workspace" in seen_histories[1]
+
+
+def test_finish_requires_an_approved_edit(monkeypatch, tmp_path: Path) -> None:
+    memory = Memory()
+    finish_request = ToolRequest("done", "finish", "")
+    apply_calls: list[ToolRequest] = []
+    monkeypatch.setattr(
+        "ark.agentic_loop.apply_finish",
+        lambda _config, request: apply_calls.append(request),
+    )
+
+    result = handle_finish(build_context(tmp_path), memory, 1, finish_request, ["finish"])
+
+    assert result is None
+    assert apply_calls == []
+    assert memory.entries[-1].result == FINISH_WITHOUT_EDIT_MESSAGE
 
 
 def test_approved_edit_is_kept_after_successful_finish(monkeypatch, tmp_path: Path) -> None:
@@ -107,6 +130,7 @@ def test_redundant_consecutive_read_is_still_skipped(monkeypatch, tmp_path: Path
     ])
     monkeypatch.setattr("ark.agentic_loop.get_next_tool_request", lambda _config, _memory: next(responses))
     monkeypatch.setattr("ark.agentic_loop.apply_finish", lambda *_args: ApplyFinishResult("completed"))
+    monkeypatch.setattr(Memory, "has_successful_edit", lambda _memory: True)
 
     result = agentic_loop(context)
 

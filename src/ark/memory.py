@@ -25,6 +25,13 @@ class Memory:
     def contains_tool(self, name: str) -> bool:
         return any(entry.tool_request.name == name for entry in self.entries)
 
+    def has_successful_edit(self) -> bool:
+        return any(
+            entry.tool_request.name == "edit_file"
+            and entry.result.startswith("Edit applied successfully to ")
+            for entry in self.entries
+        )
+
     def last_tool_request(self) -> ToolRequest | None:
         if not self.entries:
             return None
