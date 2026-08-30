@@ -16,10 +16,12 @@ It focuses on one narrow workflow:
 
 1. load a workspace
 2. copy it to an internal runtime directory
-3. let a model inspect files and run tests
-4. let the model propose precise file edits
-5. ask the user for approval before applying each edit
-6. run final tests when the model finishes
+3. load the task prompt and optional workspace instructions
+4. let the model inspect the copied workspace through a small tool API
+5. let the model propose exact-match file edits
+6. show every proposed edit as a generated diff and request user approval
+7. preserve approved edits while the model iterates on failures
+8. run final tests only when the model explicitly finishes
 
 The project is meant for learning, experimentation, and research rather than broad production automation.
 
@@ -56,8 +58,10 @@ What you should expect during a run:
 - it creates or refreshes `./ark-workspace`
 - the model chooses among a small set of tools
 - each proposed file edit is shown as a diff and requires approval
+- `finish` is accepted only after at least one approved edit
 - `finish` runs final tests before reporting success
 - if final tests fail, approved edits remain available for the model to correct
+- if the agent reaches its iteration limit or fails unexpectedly, Ark restores the runtime workspace to its pre-edit state
 - when the run ends, Ark prints the final status, total token usage, and elapsed time
 
 ## Configuration
@@ -98,7 +102,7 @@ Example Ollama configuration:
 ## Workspace Contract
 
 Ark runs against a workspace directory passed on the command line.
-Each workspace should contain:
+Each workspace must contain:
 
 - `prompt.txt`
 - the project files the agent may inspect or edit
@@ -158,6 +162,17 @@ This has a few important consequences:
 - approved edits happen only in the copied workspace
 - the runtime workspace is disposable and is recreated on the next run
 
+### Transaction Semantics
+
+Ark treats the runtime workspace as a transaction. Before the first approved `edit_file`, it creates a snapshot of `ark-workspace` in a temporary directory. Additional approved edits update the same runtime workspace and reuse that snapshot.
+
+- On a successful `finish`, Ark keeps the edited runtime workspace and discards the snapshot.
+- When final tests fail, Ark keeps the edits and returns the failure to the model so it can make corrective edits.
+- When the agent reaches the iteration limit or an unexpected exception escapes the loop, Ark restores the snapshot and discards all approved edits from that run.
+- If the user rejects an edit, Ark does not modify the file and does not create a snapshot solely for that rejected request.
+
+The original workspace passed on the command line is never modified.
+
 ## Example Workspaces
 
 The repository currently ships with five curated workspaces:
@@ -178,9 +193,81 @@ These workspaces are designed so that:
 
 ## Edit Workflow
 
-The model changes an existing file with `edit_file`, specifying a path and an exact `old` to `new` replacement. Ark verifies that the old block appears exactly once, calculates a unified diff internally, and asks the user for approval before writing the file.
+The model changes an existing file with `edit_file`, specifying a path and an exact `old` to `new` replacement. It does not produce a unified diff itself. Ark calculates the diff from the current file content, which avoids requiring the model to produce correct hunk headers.
+
+An `edit_file` request uses this `Action Input` format:
+
+````text
+path: src/orders.py
+old:
+```python
+def subtotal(items):
+    return sum(item["unit_price"] * item["quantity"] for item in items)
+```
+new:
+```python
+def subtotal(items):
+    return calculate_subtotal(items)
+```
+````
+
+Before prompting for approval, Ark validates that:
+
+1. `path` is inside `ark-workspace` and identifies an existing regular file.
+2. The request contains `path`, `old`, and `new` in the required triple-backtick format.
+3. The exact `old` text occurs once, and only once, in the current file.
+4. Replacing `old` with `new` changes the file; no-op edits are rejected.
+
+For a valid request, Ark computes and prints a unified diff, then asks:
+
+```text
+Authorize edit? [y/N]:
+```
+
+Entering `y` or `yes` applies the replacement. Any other answer rejects it. The model receives a result explaining whether the edit was applied, rejected, malformed, ambiguous, outside the workspace, or ineffective.
 
 Approved edits remain in the runtime workspace throughout the run. When the model sends `finish` with an empty input, Ark runs the final test command. A test failure is returned to the model so it can make a corrective edit; it does not discard the existing edits. If the run reaches its iteration limit or fails unexpectedly, Ark restores the workspace snapshot created before the first approved edit.
+
+The first version of this workflow supports replacements in existing files only. It does not yet provide `create_file`, `delete_file`, or arbitrary shell editing commands.
+
+## Agent Protocol
+
+For every model turn, Ark expects exactly one action in this textual protocol:
+
+```text
+Thought: brief reasoning for the next step
+Action: tool_name
+Action Input: tool-specific input
+```
+
+`Thought` is optional in the parser but requested by the system prompt. The model must not generate `Observation`; Ark creates observations from tool results and supplies them in the history of the next model request.
+
+The available actions are:
+
+| Action | Action Input | Result |
+| --- | --- | --- |
+| `list_files` | Relative directory path; blank means `.` | Directory entries or an error. |
+| `read_file` | Relative file path | UTF-8 file content or an error. |
+| `find_text` | `search text | directory` | Matching file lines, up to a fixed limit. |
+| `run_tests` | Blank | Output of the fixed pytest command. |
+| `edit_file` | `path`, `old`, and `new` blocks | An approved edit result, rejection, or validation error. |
+| `finish` | Blank | Final test result; success ends the run. |
+
+Ark asks for at most one action per model response. It discourages repeated reads and searches, and short-circuits an identical consecutive `read_file` request instead of reading the file again.
+
+### Finish Behavior
+
+`finish` is not an editing action. It has an empty `Action Input` and asks Ark to validate the edited workspace.
+
+Ark rejects `finish` without running tests when the request contains text or when no `edit_file` has been successfully approved during the run. Otherwise, it runs the fixed test command:
+
+```text
+python -m pytest -q -p no:cacheprovider
+```
+
+If tests pass, the transaction is committed and Ark reports success. If tests fail, Ark adds a concise failure summary to the model history, records the attempt, and continues the loop with the current approved edits intact.
+
+The loop allows at most 20 model iterations. Each model response counts as one iteration, including requests that are rejected or short-circuited. This limit prevents an agent from running indefinitely; reaching it rolls back the transaction.
 
 ## How One Run Works
 
@@ -190,8 +277,9 @@ Approved edits remain in the runtime workspace throughout the run. When the mode
 4. Ark loads `prompt.txt` and optional `AGENTS.md` from the copied workspace and builds the user-side workspace context.
 5. `agentic_loop.py` asks the configured model for the next action.
 6. `tools.py` executes the selected tool inside `ark-workspace`.
-7. When the model returns `finish`, `finish_handler.py` runs the final tests.
-8. If they pass, Ark keeps the approved edits and accepts the run.
+7. For `edit_file`, Ark validates the replacement, previews its internally generated diff, and asks for approval.
+8. For `finish`, Ark validates the request and runs the final tests.
+9. If they pass, Ark commits the transaction; otherwise, it returns the failure to the model for another iteration.
 
 ```mermaid
 sequenceDiagram
@@ -201,40 +289,43 @@ sequenceDiagram
 
     AgentLoop->>Model: request next action
     Model-->>AgentLoop: Thought / Action / Action Input
-    AgentLoop->>Workspace: run tool
+    AgentLoop->>Workspace: run read/search/test tool
     Workspace-->>AgentLoop: tool result
-    AgentLoop->>Workspace: preview and apply approved edit_file request
+    AgentLoop->>Workspace: validate edit_file and build diff
+    AgentLoop->>Workspace: apply approved edit
     AgentLoop->>Workspace: run final tests on finish
+    Workspace-->>AgentLoop: final test result
 ```
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    A["Setup and Config<br/>inputs.py"] --> B["Agent Loop and Memory<br/>agentic_loop.py"]
+    A["Setup and Config<br/>inputs.py"] --> B["Agent Loop<br/>agentic_loop.py"]
     B --> C["Model Protocol<br/>models.py + protocol.py"]
-    B --> D["Tools<br/>tools.py + guards.py"]
-    B --> E["Editing and Finish<br/>tools.py + finish_handler.py + test_failures.py"]
-    A --> D
+    B --> D["Memory<br/>memory.py"]
+    B --> E["Tools and Editing<br/>tools.py + guards.py"]
+    B --> G["Finish Validation<br/>finish_handler.py + test_failures.py"]
     C --> F["Observability<br/>cli_output.py + traces.py"]
-    D --> F
     E --> F
+    G --> F
 ```
 
-The codebase is intentionally small and can be read as six main modules:
+The codebase is intentionally small and can be read as seven main modules:
 
-- `Agent Loop and Memory`
-  - `src/ark/agentic_loop.py`: runs the main ReAct-style loop and owns loop-local runtime structures such as `Memory`, `MemoryEntry`, and `LoopResult`
+- `Agent Loop`
+  - `src/ark/agentic_loop.py`: runs the main ReAct-style loop, coordinates tools, handles `finish`, and commits or rolls back the transaction
+- `Memory`
+  - `src/ark/memory.py`: records executed actions and results, summarizes previous reads and searches, and builds the history included in the next model request
 - `Setup and Config`
   - `src/ark/inputs.py`: loads config and prompts, resolves the source workspace, prepares `ark-workspace`, and defines `AgentConfig`
 - `Model Protocol`
   - `src/ark/models.py`: defines model request and response dataclasses and sends requests to the configured model backend
   - `src/ark/protocol.py`: defines `ToolRequest` and parses, validates, and repairs model responses into Ark actions
-- `Tools`
-  - `src/ark/tools.py`: implements the available workspace-safe tools
+- `Tools and Editing`
+  - `src/ark/tools.py`: implements workspace-safe inspection and test tools, and validates, previews, approves, and applies `edit_file` requests
   - `src/ark/guards.py`: validates safe paths and keeps tool access constrained to the runtime workspace
-- `Editing and Finish`
-  - `src/ark/tools.py`: validates, previews, approves, and applies `edit_file` requests
+- `Finish Validation`
   - `src/ark/finish_handler.py`: validates empty `finish` inputs and runs final tests
   - `src/ark/test_failures.py`: summarizes final test failures for retry prompts
 - `Observability`
@@ -266,8 +357,8 @@ Behavior notes:
 - `find_text` expects `search text | relative/or-known/workspace/path`
 - `find_text` shows the searched string in the iteration line, such as `[4] find_text "coupon"`
 - `run_tests` uses a fixed `pytest` command instead of an arbitrary shell command
-- `edit_file` replaces one exact `old` block with a `new` block after user approval
-- `finish` must have an empty `Action Input`
+- `edit_file` replaces one exact `old` block with a different `new` block after user approval
+- `finish` must have an empty `Action Input` and requires at least one approved edit
 
 The model responds using:
 
@@ -283,12 +374,11 @@ Each model response also records token usage when the provider exposes it, plus 
 The CLI also prints the total elapsed time at the end of the run.
 Because the project is didactic, inspecting this trace is often the easiest way to understand how the agent moved through a task.
 
-The trace format is intentionally compact.
+The trace format is line-oriented and intentionally compact.
 It uses short section headers such as:
 
 - `[request]`
 - `[response N]`
-- `[repair_response N]`
 - `[validation_error]`
 - `[repair_attempt]`
 - `[edit_file]`
@@ -301,12 +391,15 @@ The final `[run_summary]` block records:
 - `elapsed_seconds`: total wall-clock time for the run
 - `tools_called`: the ordered list of tool names used during the run, including final `run_tests`
 
+For an edit, `[response N]` records the model thought and requested action, while `[edit_file]` records the Ark-side outcome. A successful or rejected edit includes the generated diff; a failed edit records the validation detail. `[finish]` records final-test completion or the validation/test stage that failed.
+
 ## Security and Limits
 
 - Ark never modifies the original input workspace
 - file and directory tool paths are restricted to `ark-workspace`
 - `run_tests` uses a fixed command, not arbitrary shell execution
 - each file edit requires explicit user approval
+- a rejected or ineffective edit never changes the workspace
 - the project assumes cooperative local execution and does not try to provide OS-level sandboxing
 - this is a lightweight local safety model, not a full sandbox
 
@@ -326,4 +419,5 @@ Instead, it is a compact reference implementation for studying:
 - exact-match code modification
 - approval before mutation
 - final validation with tests
+- transaction rollback for unsuccessful runs
 - curated workspace tasks in a small, practical setup
