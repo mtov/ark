@@ -52,6 +52,17 @@ class Memory:
 
         return items
 
+    @staticmethod
+    def _context_args(tool_request: ToolRequest) -> str:
+        if tool_request.name != "edit_file":
+            return tool_request.args
+
+        for line in tool_request.args.splitlines():
+            if line.startswith("path:"):
+                return line
+
+        return "<edit content omitted>"
+
     def to_text(self) -> str:
         if not self.entries:
             return "No previous steps."
@@ -75,7 +86,7 @@ class Memory:
             formatted_entries.append(
                 f"Iteration {entry.iteration}\n"
                 f"Tool: {entry.tool_request.name}\n"
-                f"Tool Args: {entry.tool_request.args}\n"
+                f"Tool Args: {self._context_args(entry.tool_request)}\n"
                 f"Observation: {result}\n"
             )
         sections.append("Recent steps:\n" + "\n".join(formatted_entries))

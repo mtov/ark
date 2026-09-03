@@ -39,6 +39,25 @@ def test_agent_history_to_text_truncates_long_observations() -> None:
     assert "..." in text
 
 
+def test_agent_history_summarizes_edit_arguments() -> None:
+    history = Memory()
+    history.append(
+        1,
+        ToolRequest(
+            thought="edit",
+            name="edit_file",
+            args="path: src/orders.py\nold:\n```\nold content\n```\nnew:\n```\nnew content\n```",
+        ),
+        "Edit applied successfully to src/orders.py.",
+    )
+
+    text = history.to_text()
+
+    assert "Tool Args: path: src/orders.py" in text
+    assert "old content" not in text
+    assert "new content" not in text
+
+
 def test_agent_history_to_text_summarizes_unique_reads_and_searches() -> None:
     history = Memory()
     history.append(1, ToolRequest(thought="inspect", name="read_file", args="src/a.py"), "a")
