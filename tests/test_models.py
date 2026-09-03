@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from types import SimpleNamespace
 
 import pytest
@@ -9,6 +10,7 @@ from ark.inputs import AgentConfig
 from ark.models import (
     ModelConfig,
     call_ollama,
+    call_openai_compatible,
     extract_ollama_content,
     extract_ollama_usage,
     extract_openai_content,
@@ -63,6 +65,71 @@ def test_extract_openai_content_reads_text_parts() -> None:
     content = extract_openai_content(response)
 
     assert content == "part one and part two"
+
+
+def test_extract_openai_content_reports_empty_response_details() -> None:
+    response = {
+        "choices": [
+            {
+                "finish_reason": "length",
+                "message": {"content": None, "refusal": "policy"},
+            }
+        ]
+    }
+
+    with pytest.raises(ValueError, match="without message content") as error:
+        extract_openai_content(response)
+
+    message = str(error.value)
+    assert "finish_reason='length'" in message
+    assert "refusal='policy'" in message
+    assert 'response={"choices"' in message
+
+
+def test_call_openai_compatible_uses_client_timeout(monkeypatch) -> None:
+    config = AgentConfig(
+        model_config=ModelConfig(
+            model="openai-compatible",
+            timeout_seconds=30,
+            openai_base_url="http://localhost:8000/v1",
+            openai_model="local-model",
+            openai_api_key_env=None,
+        ),
+        system_prompt="system prompt",
+        user_prompt="user prompt",
+        source_workspace_path=SimpleNamespace(),
+        workspace_path=SimpleNamespace(),
+    )
+    seen: dict[str, object] = {}
+
+    class FakeOpenAI:
+        def __init__(self, **kwargs: object) -> None:
+            seen["client"] = kwargs
+            self.chat = SimpleNamespace(
+                completions=SimpleNamespace(create=self.create_completion)
+            )
+
+        def create_completion(self, **kwargs: object) -> dict[str, object]:
+            seen["completion"] = kwargs
+            return {"choices": [{"message": {"content": " final answer "}}]}
+
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=FakeOpenAI))
+
+    response = call_openai_compatible(config, "workspace prompt")
+
+    assert response.content == "final answer"
+    assert seen["client"] == {
+        "api_key": "ark",
+        "base_url": "http://localhost:8000/v1",
+        "timeout": 30,
+    }
+    assert seen["completion"] == {
+        "model": "local-model",
+        "messages": [
+            {"role": "system", "content": "system prompt"},
+            {"role": "user", "content": "workspace prompt"},
+        ],
+    }
 
 
 def test_extract_ollama_content_reads_response_field() -> None:

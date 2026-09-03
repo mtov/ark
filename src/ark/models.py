@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from dataclasses import dataclass
 import json
 import os
@@ -37,6 +36,9 @@ class ModelResponse:
     token_usage: TokenUsage
 
 
+MAX_RESPONSE_DEBUG_CHARS = 2_000
+
+
 def require_config_value(value: str | None, key: str, model_name: str) -> str:
     if not value:
         raise ValueError(f"Missing {key} for {model_name} model.")
@@ -47,22 +49,43 @@ def build_model_response(content: str, token_usage: TokenUsage | None = None) ->
     return ModelResponse(content=content, token_usage=token_usage or TokenUsage())
 
 
+def _response_field(value: object, name: str) -> object:
+    if isinstance(value, dict):
+        return value.get(name)
+    return getattr(value, name, None)
+
+
+def _serialize_response_for_error(response: object) -> str:
+    model_dump = getattr(response, "model_dump", None)
+    if callable(model_dump):
+        payload = model_dump(exclude_none=True)
+    elif isinstance(response, dict):
+        payload = response
+    elif hasattr(response, "__dict__"):
+        payload = vars(response)
+    else:
+        payload = repr(response)
+
+    try:
+        serialized = json.dumps(payload, default=str, ensure_ascii=True)
+    except (TypeError, ValueError):
+        serialized = repr(payload)
+
+    if len(serialized) > MAX_RESPONSE_DEBUG_CHARS:
+        return f"{serialized[:MAX_RESPONSE_DEBUG_CHARS]}... (truncated)"
+    return serialized
+
+
 def extract_openai_content(response: object) -> str:
-    choices = getattr(response, "choices", None)
-    if choices is None and isinstance(response, dict):
-        choices = response.get("choices")
+    choices = _response_field(response, "choices")
 
     if not choices:
         raise ValueError("OpenAI-compatible model returned a response without choices.")
 
     first_choice = choices[0]
-    message = getattr(first_choice, "message", None)
-    if message is None and isinstance(first_choice, dict):
-        message = first_choice.get("message", {})
+    message = _response_field(first_choice, "message") or {}
 
-    content = getattr(message, "content", None)
-    if content is None and isinstance(message, dict):
-        content = message.get("content")
+    content = _response_field(message, "content")
 
     if isinstance(content, str) and content.strip():
         return content.strip()
@@ -83,24 +106,24 @@ def extract_openai_content(response: object) -> str:
         if joined:
             return joined
 
-    raise ValueError("OpenAI-compatible model returned a response without message content.")
+    finish_reason = _response_field(first_choice, "finish_reason")
+    refusal = _response_field(message, "refusal")
+    serialized_response = _serialize_response_for_error(response)
+    raise ValueError(
+        "OpenAI-compatible model returned a response without message content. "
+        f"finish_reason={finish_reason!r}; refusal={refusal!r}; "
+        f"response={serialized_response}"
+    )
 
 
 def extract_openai_usage(response: object) -> TokenUsage:
-    usage = getattr(response, "usage", None)
-    if usage is None and isinstance(response, dict):
-        usage = response.get("usage")
+    usage = _response_field(response, "usage")
     if usage is None:
         return TokenUsage()
 
-    prompt_tokens = getattr(usage, "prompt_tokens", None)
-    output_tokens = getattr(usage, "completion_tokens", None)
-    total_tokens = getattr(usage, "total_tokens", None)
-
-    if isinstance(usage, dict):
-        prompt_tokens = usage.get("prompt_tokens", prompt_tokens)
-        output_tokens = usage.get("completion_tokens", output_tokens)
-        total_tokens = usage.get("total_tokens", total_tokens)
+    prompt_tokens = _response_field(usage, "prompt_tokens")
+    output_tokens = _response_field(usage, "completion_tokens")
+    total_tokens = _response_field(usage, "total_tokens")
 
     if total_tokens is None and (prompt_tokens is not None or output_tokens is not None):
         total_tokens = (prompt_tokens or 0) + (output_tokens or 0)
@@ -142,23 +165,17 @@ def call_openai_compatible(config: AgentConfig, user_prompt: str) -> ModelRespon
     client = OpenAI(
         api_key=resolve_openai_api_key(config),
         base_url=config.model_config.openai_base_url,
+        timeout=config.model_config.timeout_seconds,
     )
 
     try:
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            future = executor.submit(
-                client.chat.completions.create,
-                model=openai_model,
-                messages=[
-                    {"role": "system", "content": config.system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-            )
-            response = future.result(timeout=config.model_config.timeout_seconds)
-    except FuturesTimeoutError as exc:
-        raise RuntimeError(
-            f"OpenAI-compatible request timed out after {config.model_config.timeout_seconds} seconds."
-        ) from exc
+        response = client.chat.completions.create(
+            model=openai_model,
+            messages=[
+                {"role": "system", "content": config.system_prompt},
+                {"role": "user", "content": user_prompt},
+            ],
+        )
     except Exception as exc:  # noqa: BLE001
         base_url = config.model_config.openai_base_url or "default OpenAI endpoint"
         raise RuntimeError(

@@ -15,7 +15,8 @@ RUNTIME_WORKSPACE_PATH = PROJECT_ROOT / "ark-workspace"
 CONFIG_DIR = PROJECT_ROOT / "config"
 CONFIG_PATH = CONFIG_DIR / "config.json"
 SYSTEM_PROMPT_PATH = CONFIG_DIR / "system_prompt.txt"
-WORKSPACE_INSTRUCTIONS_PATH = "AGENTS.md"
+WORKSPACE_INSTRUCTIONS_FILE_NAME = "AGENTS.md"
+USER_PROMPT_FILE_NAME = "prompt.txt"
 IGNORED_WORKSPACE_NAMES = ("evaluation",)
 
 
@@ -35,7 +36,7 @@ def _read_text_file(
     missing_message: str,
     read_message: str,
     empty_message: str | None = None,
-) -> str | None:
+) -> str:
     try:
         content = path.read_text(encoding="utf-8").strip()
     except FileNotFoundError as exc:
@@ -46,7 +47,7 @@ def _read_text_file(
     if not content and empty_message is not None:
         raise ValueError(empty_message)
 
-    return content or None
+    return content
 
 
 def parse_args() -> argparse.Namespace:
@@ -61,6 +62,8 @@ def load_model_config() -> ModelConfig:
             raw_config = json.load(file)
     except FileNotFoundError as exc:
         raise FileNotFoundError(f"Config file not found: {CONFIG_PATH}") from exc
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Config file contains invalid JSON: {CONFIG_PATH}") from exc
     except OSError as exc:
         raise OSError(f"Could not read config file: {CONFIG_PATH}") from exc
 
@@ -80,18 +83,16 @@ def load_model_config() -> ModelConfig:
 
 
 def load_system_prompt() -> str:
-    prompt = _read_text_file(
+    return _read_text_file(
         SYSTEM_PROMPT_PATH,
         missing_message=f"System prompt file not found: {SYSTEM_PROMPT_PATH}",
         read_message=f"Could not read system prompt file: {SYSTEM_PROMPT_PATH}",
         empty_message="System prompt file is empty.",
     )
-    assert prompt is not None
-    return prompt
 
 
 def load_workspace_instructions(workspace_path: Path) -> str | None:
-    instructions_path = workspace_path / WORKSPACE_INSTRUCTIONS_PATH
+    instructions_path = workspace_path / WORKSPACE_INSTRUCTIONS_FILE_NAME
     if not instructions_path.exists():
         return None
 
@@ -99,7 +100,7 @@ def load_workspace_instructions(workspace_path: Path) -> str | None:
         instructions_path,
         missing_message=f"Workspace instructions file not found: {instructions_path}",
         read_message=f"Could not read workspace instructions file: {instructions_path}",
-    )
+    ) or None
 
 
 def resolve_workspace_path(raw_path: str) -> Path:
@@ -133,12 +134,20 @@ def create_workspace_snapshot(config: AgentConfig) -> None:
     config.snapshot_path = snapshot_path
 
 
+def _discard_workspace_snapshot(config: AgentConfig) -> None:
+    snapshot_path = config.snapshot_path
+    if snapshot_path is None:
+        return
+
+    shutil.rmtree(snapshot_path.parent)
+    config.snapshot_path = None
+
+
 def commit_workspace_changes(config: AgentConfig) -> None:
     if config.snapshot_path is None:
         return
 
-    shutil.rmtree(config.snapshot_path.parent)
-    config.snapshot_path = None
+    _discard_workspace_snapshot(config)
 
 
 def rollback_workspace_changes(config: AgentConfig) -> None:
@@ -147,20 +156,21 @@ def rollback_workspace_changes(config: AgentConfig) -> None:
 
     shutil.rmtree(config.workspace_path)
     shutil.copytree(config.snapshot_path, config.workspace_path)
-    shutil.rmtree(config.snapshot_path.parent)
-    config.snapshot_path = None
+    _discard_workspace_snapshot(config)
 
 
 def load_user_prompt(workspace_path: Path) -> str:
-    prompt_path = workspace_path / "prompt.txt"
-    prompt = _read_text_file(
+    prompt_path = workspace_path / USER_PROMPT_FILE_NAME
+    return _read_text_file(
         prompt_path,
         missing_message=f"User prompt file not found: {prompt_path}",
         read_message=f"Could not read user prompt file: {prompt_path}",
         empty_message="User prompt file is empty.",
     )
-    assert prompt is not None
-    return prompt
+
+
+def build_system_prompt(system_prompt: str, workspace_path: Path) -> str:
+    return f"{system_prompt}\n\nWorkspace root:\n{workspace_path}"
 
 
 def build_user_prompt(user_prompt: str, workspace_instructions: str | None = None) -> str:
@@ -190,12 +200,7 @@ def prepare_run(workspace_path_arg: str) -> AgentConfig:
     workspace_path = prepare_runtime_workspace(source_workspace_path)
     model_config = load_model_config()
     print_model_summary(model_config)
-    system_prompt = load_system_prompt()
-    system_prompt = (
-        f"{system_prompt}\n\n"
-        "Workspace root:\n"
-        f"{workspace_path}"
-    )
+    system_prompt = build_system_prompt(load_system_prompt(), workspace_path)
     workspace_instructions = load_workspace_instructions(workspace_path)
     if workspace_instructions is not None:
         print("Loading AGENTS.md")

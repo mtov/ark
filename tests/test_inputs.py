@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from ark import inputs
 
 
@@ -60,6 +62,12 @@ def test_build_user_prompt_appends_workspace_instructions() -> None:
     )
 
 
+def test_build_system_prompt_appends_workspace_root(tmp_path: Path) -> None:
+    result = inputs.build_system_prompt("Base system prompt.", tmp_path)
+
+    assert result == f"Base system prompt.\n\nWorkspace root:\n{tmp_path}"
+
+
 def test_load_model_config_supports_ollama(tmp_path: Path, monkeypatch) -> None:
     config_path = tmp_path / "config.json"
     config_path.write_text(
@@ -82,6 +90,15 @@ def test_load_model_config_supports_ollama(tmp_path: Path, monkeypatch) -> None:
     assert model_config.ollama_base_url == "http://localhost:11434"
     assert model_config.ollama_model == "qwen2.5-coder:14b"
     assert model_config.timeout_seconds == 45
+
+
+def test_load_model_config_reports_invalid_json(tmp_path: Path, monkeypatch) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text("{invalid", encoding="utf-8")
+    monkeypatch.setattr(inputs, "CONFIG_PATH", config_path)
+
+    with pytest.raises(ValueError, match="contains invalid JSON"):
+        inputs.load_model_config()
 
 
 def test_prepare_run_keeps_agents_md_out_of_system_prompt(tmp_path: Path, monkeypatch) -> None:
