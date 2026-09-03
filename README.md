@@ -8,7 +8,7 @@ Ark is a small, didactic coding agent for studying agent loops, constrained work
 
 ## Overview
 
-For each run, Ark copies a task workspace into `ark-workspace`, where the model can inspect files, run tests, and propose exact replacements in existing files. Ark previews each replacement as a diff and applies it only after user approval. The model ends with `finish`; Ark then runs the final tests.
+For each run, Ark copies a task workspace into `ark-workspace`, where the model can inspect files, run tests, and propose exact replacements in existing files. Ark previews each replacement as a diff and applies it only after user approval. The model may run tests during the loop and uses `finish` to request completion validation.
 
 Ark is intentionally narrow. It is designed for experiments and small curated tasks, not as a general-purpose autonomous coding environment.
 
@@ -22,7 +22,7 @@ export OPENAI_API_KEY="your_key_here"
 python run_ark.py ./test_workspace/bugfix_001_date_range
 ```
 
-The default configuration uses the OpenAI API. To use an OpenAI-compatible endpoint, set `openai_base_url` in `config/config.json`. To use Ollama, set `model` to `ollama` and provide `ollama_model`:
+The default configuration targets the OpenAI API. To use another OpenAI-compatible endpoint, set `openai_base_url` in `config/config.json`. To use Ollama, set `model` to `ollama` and provide `ollama_model`:
 
 ```json
 {
@@ -74,7 +74,13 @@ Ark generates tool results and adds them to the next model request as observatio
 | `edit_file` | `path`, `old`, and `new` blocks | Proposes one exact file replacement. |
 | `finish` | Blank | Runs final tests and, on success, completes the run. |
 
-Tool paths are constrained to `ark-workspace`. Ark discourages repeated reads and searches, and skips an identical consecutive `read_file` request.
+Tool paths are constrained to `ark-workspace`. Ark records files already read and searches already run in the model context, and skips an identical consecutive `read_file` request.
+
+## Context Memory
+
+Each model request includes a compact history of the run. Ark retains the last four steps, truncating each observation to 1,200 characters. It also lists files already read, searches already run, and whether tests have run.
+
+For `edit_file`, the history retains only the edited path and result; it does not resend the complete `old` and `new` blocks. The applied diff remains available in `agent_trace.log`.
 
 ## Editing
 
@@ -126,9 +132,11 @@ Ark writes the most recent execution to `agent_trace.log`, clearing it at the st
 - `[request]`: task prompt.
 - `[response N]`: parsed model thought and requested action.
 - `[edit_file]`: validation result, generated diff, or rejection reason.
+- `[tests]`: result of a `run_tests` action requested by the model.
 - `[finish]`: finish validation or final-test outcome.
 - `[validation_error]` and `[repair_attempt]`: protocol failures and repair requests.
-- `[run_summary]`: token total, elapsed time, and ordered tools called.
+- `[error]`: execution failure, including its stage and tools already called.
+- `[run_summary]`: token total, elapsed time, and per-tool call counts.
 
 `agent_trace.log` is intentionally excluded from Git.
 
