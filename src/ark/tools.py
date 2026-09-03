@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from dataclasses import dataclass
 from difflib import unified_diff
 from pathlib import Path
 
@@ -20,6 +21,12 @@ REDUNDANT_READ_FILE_MESSAGE = (
     "Do not request the same file again unless it changed or you need to verify a specific detail "
     "before finishing. Continue with a different action."
 )
+
+
+@dataclass
+class ToolResult:
+    output: str
+    note: str | None = None
 
 
 def _resolve_workspace_target(action_input: str, workspace_path: Path) -> Path | str:
@@ -236,37 +243,27 @@ def should_skip_redundant_tool_request(
     return None
 
 
-def run_tool_with_status(
-    request: ToolRequest,
-    config: AgentConfig,
-    previous_request: ToolRequest | None = None,
-) -> tuple[str, str | None]:
-    skipped_reason = should_skip_redundant_tool_request(request, previous_request)
-    if skipped_reason is not None:
-        return skipped_reason, "skipped: redundant"
-
-    return run_tool(request, config, previous_request), None
-
-
 def run_tool(
     request: ToolRequest,
     config: AgentConfig,
     previous_request: ToolRequest | None = None,
-) -> str:
+) -> ToolResult:
     workspace_path = config.workspace_path
     skipped_reason = should_skip_redundant_tool_request(request, previous_request)
     if skipped_reason is not None:
-        return skipped_reason
+        return ToolResult(skipped_reason, note="skipped: redundant")
 
     if request.name == "list_files":
-        return list_files(request.args, workspace_path)
+        return ToolResult(list_files(request.args, workspace_path))
     if request.name == "read_file":
-        return read_file(request.args, workspace_path)
+        return ToolResult(read_file(request.args, workspace_path))
     if request.name == "find_text":
-        return find_text(request.args, workspace_path)
+        return ToolResult(find_text(request.args, workspace_path))
     if request.name == "run_tests":
-        return run_tests(workspace_path)
+        return ToolResult(run_tests(workspace_path))
     if request.name == "edit_file":
-        return edit_file(request.args, config)
+        return ToolResult(edit_file(request.args, config))
 
-    return f"Unsupported action '{request.name}'. Use list_files, read_file, find_text, run_tests, edit_file, or finish."
+    return ToolResult(
+        f"Unsupported action '{request.name}'. Use list_files, read_file, find_text, run_tests, edit_file, or finish."
+    )

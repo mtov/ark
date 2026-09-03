@@ -133,7 +133,7 @@ def create_workspace_snapshot(config: AgentConfig) -> None:
     config.snapshot_path = snapshot_path
 
 
-def commit_workspace_transaction(config: AgentConfig) -> None:
+def commit_workspace_changes(config: AgentConfig) -> None:
     if config.snapshot_path is None:
         return
 
@@ -141,7 +141,7 @@ def commit_workspace_transaction(config: AgentConfig) -> None:
     config.snapshot_path = None
 
 
-def rollback_workspace_transaction(config: AgentConfig) -> None:
+def rollback_workspace_changes(config: AgentConfig) -> None:
     if config.snapshot_path is None:
         return
 

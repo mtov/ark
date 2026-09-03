@@ -5,22 +5,22 @@ from time import perf_counter
 
 from .cli_output import (
     print_failure_summary,
-    print_iteration_action,
+    print_tool_request,
     print_success_summary,
 )
 from .finish_handler import apply_finish
 from .inputs import (
     AgentConfig,
-    commit_workspace_transaction,
+    commit_workspace_changes,
     parse_args,
     prepare_run,
-    rollback_workspace_transaction,
+    rollback_workspace_changes,
 )
 from .memory import Memory
 from .models import call_model
 from .protocol import ToolRequest, parse_response, repair_response
 from .test_failures import summarize_test_failure_output
-from .tools import run_tool_with_status
+from .tools import run_tool
 from .traces import trace_action, trace_finish_event, trace_run_summary, trace_validation_error
 
 MAX_ITERATIONS_REACHED_MESSAGE = "Agent stopped after reaching the maximum number of steps."
@@ -85,13 +85,13 @@ def handle_finish(
     tools_called: list[str],
 ) -> str | None:
     if not memory.has_successful_edit():
-        print_iteration_action(iteration, tool_request)
+        print_tool_request(iteration, tool_request)
         trace_finish_event("failed", "finish_validation", FINISH_WITHOUT_EDIT_MESSAGE)
         memory.append(iteration, tool_request, FINISH_WITHOUT_EDIT_MESSAGE)
         return None
 
     finish_result = apply_finish(config, tool_request)
-    print_iteration_action(iteration, tool_request)
+    print_tool_request(iteration, tool_request)
 
     if finish_result.status == "invalid_finish":
         memory.append(
@@ -133,21 +133,21 @@ def agentic_loop(config: AgentConfig) -> LoopResult:
                 if finish_output is None:
                     continue
 
-                commit_workspace_transaction(config)
+                commit_workspace_changes(config)
                 return LoopResult.success(
                     finish_output,
                     tools_called=tools_called,
                 )
 
             previous_request = memory.last_tool_request()
-            result, note = run_tool_with_status(tool_request, config, previous_request)
-            print_iteration_action(iteration, tool_request, note)
-            memory.append(iteration, tool_request, result)
+            tool_result = run_tool(tool_request, config, previous_request)
+            print_tool_request(iteration, tool_request, tool_result.note)
+            memory.append(iteration, tool_request, tool_result.output)
 
-        rollback_workspace_transaction(config)
+        rollback_workspace_changes(config)
         return LoopResult.max_iterations_reached(tools_called=tools_called)
     except Exception:
-        rollback_workspace_transaction(config)
+        rollback_workspace_changes(config)
         raise
 
 
@@ -161,7 +161,7 @@ def main() -> int:
         loop_result = agentic_loop(config)
     except Exception as exc:  # noqa: BLE001
         if config is not None:
-            rollback_workspace_transaction(config)
+            rollback_workspace_changes(config)
         elapsed_seconds = perf_counter() - start_time
         trace_run_summary(elapsed_seconds, [])
         print_failure_summary(exc, elapsed_seconds)

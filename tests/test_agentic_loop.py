@@ -14,6 +14,7 @@ from ark.finish_handler import ApplyFinishResult
 from ark.inputs import AgentConfig
 from ark.models import ModelConfig
 from ark.protocol import ToolRequest
+from ark.tools import ToolResult
 
 
 def build_context(tmp_path: Path) -> AgentConfig:
@@ -111,7 +112,10 @@ def test_max_iterations_rolls_back_transaction(monkeypatch, tmp_path: Path) -> N
         lambda _config, _memory: ToolRequest("explore", "list_files", "."),
     )
     monkeypatch.setattr("ark.agentic_loop.MAX_ITERATIONS", 1)
-    monkeypatch.setattr("ark.agentic_loop.run_tool_with_status", lambda *_args: ("files", None))
+    monkeypatch.setattr(
+        "ark.agentic_loop.run_tool",
+        lambda *_args: ToolResult("files"),
+    )
 
     result = agentic_loop(context)
 
