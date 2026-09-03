@@ -21,7 +21,13 @@ from .models import call_model
 from .protocol import ToolRequest, parse_response, repair_response
 from .test_failures import summarize_test_failure_output
 from .tools import run_tool
-from .traces import trace_action, trace_finish_event, trace_run_summary, trace_validation_error
+from .traces import (
+    trace_action,
+    trace_error,
+    trace_finish_event,
+    trace_run_summary,
+    trace_validation_error,
+)
 
 MAX_ITERATIONS_REACHED_MESSAGE = "Agent stopped after reaching the maximum number of steps."
 MAX_ITERATIONS = 20
@@ -34,6 +40,7 @@ class LoopResult:
     status: str
     output: str | None = None
     error: str | None = None
+    error_type: str | None = None
     tools_called: list[str] = field(default_factory=list)
 
     @classmethod
@@ -55,6 +62,15 @@ class LoopResult:
             status="max_iterations_reached",
             error=MAX_ITERATIONS_REACHED_MESSAGE,
             tools_called=tools_called or [],
+        )
+
+    @classmethod
+    def failure(cls, error: Exception, *, tools_called: list[str]) -> LoopResult:
+        return cls(
+            status="failed",
+            error=str(error),
+            error_type=error.__class__.__name__,
+            tools_called=tools_called,
         )
 
 
@@ -114,9 +130,9 @@ def handle_finish(
 
 
 def agentic_loop(config: AgentConfig) -> LoopResult:
+    tools_called: list[str] = []
     try:
         memory = Memory()
-        tools_called: list[str] = []
 
         for iteration in range(1, MAX_ITERATIONS + 1):
             tool_request = get_next_tool_request(config, memory)
@@ -146,9 +162,9 @@ def agentic_loop(config: AgentConfig) -> LoopResult:
 
         rollback_workspace_changes(config)
         return LoopResult.max_iterations_reached(tools_called=tools_called)
-    except Exception:
+    except Exception as exc:  # noqa: BLE001
         rollback_workspace_changes(config)
-        raise
+        return LoopResult.failure(exc, tools_called=tools_called)
 
 
 def main() -> int:
@@ -163,6 +179,7 @@ def main() -> int:
         if config is not None:
             rollback_workspace_changes(config)
         elapsed_seconds = perf_counter() - start_time
+        trace_error("prepare_run", str(exc), exc.__class__.__name__, [])
         trace_run_summary(elapsed_seconds, [])
         print_failure_summary(exc, elapsed_seconds)
         return 1
@@ -170,6 +187,13 @@ def main() -> int:
     elapsed_seconds = perf_counter() - start_time
 
     if loop_result.status != "success":
+        if loop_result.status == "failed":
+            trace_error(
+                "agentic_loop",
+                loop_result.error or "Unknown error.",
+                loop_result.error_type or "Exception",
+                loop_result.tools_called,
+            )
         trace_run_summary(elapsed_seconds, loop_result.tools_called)
         print_failure_summary(
             ValueError(loop_result.error or "Unknown error."),

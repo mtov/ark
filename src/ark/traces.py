@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -85,13 +86,10 @@ def _format_action(tool_request: ToolRequest) -> str:
 
 
 def trace_action(tool_request: ToolRequest) -> None:
-    args = tool_request.args.strip()
     lines = [
         f"thought: {tool_request.thought}",
         f"action: {_format_action(tool_request)}",
     ]
-    if tool_request.name == "edit_file" and args:
-        lines.extend(("edit:", args))
     _append_event(f"response {RESPONSE_COUNT}", lines)
 
 
@@ -117,12 +115,41 @@ def trace_finish_event(status: str, stage: str, detail: str | None = None) -> No
     _append_event("finish", lines)
 
 
+def trace_test_event(status: str, detail: str | None = None) -> None:
+    lines = [f"status: {status}"]
+    _append_optional_block(lines, "detail", detail)
+    _append_event("tests", lines)
+
+
+def trace_error(
+    stage: str,
+    error: str,
+    error_type: str,
+    tools_called: list[str],
+) -> None:
+    _append_event(
+        "error",
+        [
+            f"stage: {stage}",
+            f"type: {error_type}",
+            f"detail: {error}",
+            f"tools_called: {', '.join(tools_called)}",
+        ],
+    )
+
+
+def _format_tool_counts(tools_called: list[str]) -> str:
+    return ", ".join(
+        f"{tool}={count}" for tool, count in Counter(tools_called).items()
+    )
+
+
 def trace_run_summary(elapsed_seconds: float, tools_called: list[str]) -> None:
     _append_event(
         "run_summary",
         [
             f"total_tokens: {get_total_tokens()}",
             f"elapsed_seconds: {elapsed_seconds:.2f}",
-            f"tools_called: {', '.join(tools_called)}",
+            f"tool_counts: {_format_tool_counts(tools_called)}",
         ],
     )

@@ -125,6 +125,21 @@ def test_max_iterations_rolls_back_transaction(monkeypatch, tmp_path: Path) -> N
     assert context.snapshot_path is None
 
 
+def test_agentic_loop_returns_failure_with_tool_history(monkeypatch, tmp_path: Path) -> None:
+    context = build_context(tmp_path)
+    monkeypatch.setattr(
+        "ark.agentic_loop.get_next_tool_request",
+        lambda _config, _memory: (_ for _ in ()).throw(ValueError("missing content")),
+    )
+
+    result = agentic_loop(context)
+
+    assert result.status == "failed"
+    assert result.error == "missing content"
+    assert result.error_type == "ValueError"
+    assert result.tools_called == []
+
+
 def test_redundant_consecutive_read_is_still_skipped(monkeypatch, tmp_path: Path) -> None:
     context = build_context(tmp_path)
     responses = iter([

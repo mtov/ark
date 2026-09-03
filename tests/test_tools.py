@@ -35,6 +35,21 @@ def test_read_file_returns_file_contents(tmp_path: Path) -> None:
     assert content == "hello"
 
 
+def test_run_tests_records_test_result(monkeypatch, tmp_path: Path) -> None:
+    events: list[tuple[str, str | None]] = []
+    monkeypatch.setattr(tools, "run_tests_with_status", lambda _path: (False, "1 failed"))
+    monkeypatch.setattr(
+        tools,
+        "trace_test_event",
+        lambda status, detail=None: events.append((status, detail)),
+    )
+
+    output = tools.run_tests(tmp_path)
+
+    assert output == "1 failed"
+    assert events == [("failed", "1 failed")]
+
+
 def test_edit_file_applies_approved_replacement(monkeypatch, tmp_path: Path) -> None:
     file_path = tmp_path / "example.py"
     file_path.write_text("value = old\n", encoding="utf-8")

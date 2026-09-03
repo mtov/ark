@@ -99,7 +99,27 @@ def test_trace_action_records_edit_details_separately(monkeypatch, tmp_path: Pat
     content = log_path.read_text(encoding="utf-8")
 
     assert "action: edit_file file.py" in content
-    assert "edit:\npath: file.py" in content
+    assert "edit:" not in content
+
+
+def test_trace_error_records_failure_context(monkeypatch, tmp_path: Path) -> None:
+    log_path = tmp_path / "agent_trace.log"
+    monkeypatch.setattr(traces, "LOG_PATH", log_path)
+
+    traces.clear_trace()
+    traces.trace_error(
+        "agentic_loop",
+        "response had no content",
+        "ValueError",
+        ["read_file", "run_tests"],
+    )
+
+    content = log_path.read_text(encoding="utf-8")
+
+    assert "[error]" in content
+    assert "stage: agentic_loop" in content
+    assert "type: ValueError" in content
+    assert "tools_called: read_file, run_tests" in content
 
 
 def test_trace_run_summary_records_total_tokens_and_elapsed_time(monkeypatch, tmp_path: Path) -> None:
@@ -117,4 +137,4 @@ def test_trace_run_summary_records_total_tokens_and_elapsed_time(monkeypatch, tm
     assert "[run_summary]" in content
     assert "total_tokens: 5" in content
     assert "elapsed_seconds: 12.35" in content
-    assert "tools_called: list_files, read_file, edit_file, finish, run_tests" in content
+    assert "tool_counts: list_files=1, read_file=1, edit_file=1, finish=1, run_tests=1" in content

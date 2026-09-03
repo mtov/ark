@@ -10,7 +10,7 @@ from pathlib import Path
 from .guards import resolve_tool_path
 from .inputs import AgentConfig, create_workspace_snapshot
 from .protocol import ToolRequest, parse_edit_file_request
-from .traces import trace_edit_event
+from .traces import trace_edit_event, trace_test_event
 
 MAX_FIND_TEXT_MATCHES = 20
 SKIPPED_DIRECTORIES = {".git", ".venv", "__pycache__"}
@@ -158,7 +158,8 @@ def run_tests_with_status(workspace_path: Path) -> tuple[bool, str]:
 
 
 def run_tests(workspace_path: Path) -> str:
-    _passed, output = run_tests_with_status(workspace_path)
+    passed, output = run_tests_with_status(workspace_path)
+    trace_test_event("passed" if passed else "failed", None if passed else output)
     return output
 
 
