@@ -35,6 +35,16 @@ def test_get_total_tokens_returns_none_when_usage_is_unavailable(monkeypatch, tm
     assert traces.get_total_tokens() is None
 
 
+def test_get_total_tokens_preserves_zero_usage(monkeypatch, tmp_path: Path) -> None:
+    log_path = tmp_path / "agent_trace.log"
+    monkeypatch.setattr(traces, "LOG_PATH", log_path)
+
+    traces.clear_trace()
+    traces.record_response_usage(token_usage=TokenUsage(total_tokens=0))
+
+    assert traces.get_total_tokens() == 0
+
+
 def test_trace_finish_event_records_stage_and_detail(monkeypatch, tmp_path: Path) -> None:
     log_path = tmp_path / "agent_trace.log"
     monkeypatch.setattr(traces, "LOG_PATH", log_path)
