@@ -138,3 +138,15 @@ def test_trace_run_summary_records_total_tokens_and_elapsed_time(monkeypatch, tm
     assert "total_tokens: 5" in content
     assert "elapsed_seconds: 12.35" in content
     assert "tool_counts: list_files=1, read_file=1, edit_file=1, finish=1, run_tests=1" in content
+def test_trace_workspace_event_records_rollback_reason(monkeypatch, tmp_path: Path) -> None:
+    log_path = tmp_path / "agent_trace.log"
+    monkeypatch.setattr(traces, "LOG_PATH", log_path)
+
+    traces.clear_trace()
+    traces.trace_workspace_event("rolled_back", "agentic loop error")
+
+    content = log_path.read_text(encoding="utf-8")
+
+    assert "[workspace]" in content
+    assert "status: rolled_back" in content
+    assert "reason: agentic loop error" in content

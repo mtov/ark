@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .models import ModelConfig
-from .traces import clear_trace, trace_request
+from .traces import clear_trace, trace_request, trace_workspace_event
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 RUNTIME_WORKSPACE_PATH = PROJECT_ROOT / "ark-workspace"
@@ -148,15 +148,17 @@ def commit_workspace_changes(config: AgentConfig) -> None:
         return
 
     _discard_workspace_snapshot(config)
+    trace_workspace_event("committed")
 
 
-def rollback_workspace_changes(config: AgentConfig) -> None:
+def rollback_workspace_changes(config: AgentConfig, reason: str | None = None) -> None:
     if config.snapshot_path is None:
         return
 
     shutil.rmtree(config.workspace_path)
     shutil.copytree(config.snapshot_path, config.workspace_path)
     _discard_workspace_snapshot(config)
+    trace_workspace_event("rolled_back", reason)
 
 
 def load_user_prompt(workspace_path: Path) -> str:

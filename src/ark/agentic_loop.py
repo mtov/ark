@@ -160,10 +160,10 @@ def agentic_loop(config: AgentConfig) -> LoopResult:
             print_tool_request(iteration, tool_request, tool_result.note)
             memory.append(iteration, tool_request, tool_result.output)
 
-        rollback_workspace_changes(config)
+        rollback_workspace_changes(config, MAX_ITERATIONS_REACHED_MESSAGE)
         return LoopResult.max_iterations_reached(tools_called=tools_called)
     except Exception as exc:  # noqa: BLE001
-        rollback_workspace_changes(config)
+        rollback_workspace_changes(config, "agentic loop error")
         return LoopResult.failure(exc, tools_called=tools_called)
 
 

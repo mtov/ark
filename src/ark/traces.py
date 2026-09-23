@@ -121,6 +121,12 @@ def trace_test_event(status: str, detail: str | None = None) -> None:
     _append_event("tests", lines)
 
 
+def trace_workspace_event(status: str, reason: str | None = None) -> None:
+    lines = [f"status: {status}"]
+    _append_optional_field(lines, "reason", reason)
+    _append_event("workspace", lines)
+
+
 def trace_error(
     stage: str,
     error: str,

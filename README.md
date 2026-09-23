@@ -132,6 +132,7 @@ Ark writes the most recent execution to `agent_trace.log`, clearing it at the st
 - `[request]`: task prompt.
 - `[response N]`: parsed model thought and requested action.
 - `[edit_file]`: validation result, generated diff, or rejection reason.
+- `[workspace]`: commit or rollback of approved workspace changes.
 - `[tests]`: result of a `run_tests` action requested by the model.
 - `[finish]`: finish validation or final-test outcome.
 - `[validation_error]` and `[repair_attempt]`: protocol failures and repair requests.
