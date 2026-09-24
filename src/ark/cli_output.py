@@ -3,29 +3,29 @@ from __future__ import annotations
 from math import floor
 from pathlib import Path
 
-from .protocol import ToolRequest
+from .protocol import ToolCall
 from .traces import get_total_tokens
 
 
-def format_iteration_action(tool_request: ToolRequest) -> str:
-    if tool_request.name == "list_files":
-        path = tool_request.args.strip() or "."
-        return f"{tool_request.name} {path}"
+def format_iteration_action(tool_call: ToolCall) -> str:
+    if tool_call.name == "list_files":
+        path = tool_call.args.strip() or "."
+        return f"{tool_call.name} {path}"
 
-    if tool_request.name == "read_file":
-        return f"{tool_request.name} {Path(tool_request.args).name}"
+    if tool_call.name == "read_file":
+        return f"{tool_call.name} {Path(tool_call.args).name}"
 
-    if tool_request.name == "find_text":
-        query = tool_request.args.split("|", maxsplit=1)[0].strip()
+    if tool_call.name == "find_text":
+        query = tool_call.args.split("|", maxsplit=1)[0].strip()
         if query:
-            return f'{tool_request.name} "{query}"'
+            return f'{tool_call.name} "{query}"'
 
-    return tool_request.name
+    return tool_call.name
 
 
-def print_tool_request(iteration: int, tool_request: ToolRequest, note: str | None = None) -> None:
+def print_tool_call(iteration: int, tool_call: ToolCall, note: str | None = None) -> None:
     suffix = f" ({note})" if note else ""
-    print(f"[{iteration}] {format_iteration_action(tool_request)}{suffix}", flush=True)
+    print(f"[{iteration}] {format_iteration_action(tool_call)}{suffix}", flush=True)
 
 
 def print_total_tokens() -> None:

@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .inputs import AgentConfig
-from .protocol import ToolRequest
+from .protocol import ToolCall
 from .traces import trace_finish_event
 from .tools import run_tests_with_status
 
@@ -18,9 +18,9 @@ class ApplyFinishResult:
 
 def apply_finish(
     config: AgentConfig,
-    tool_request: ToolRequest,
+    tool_call: ToolCall,
 ) -> ApplyFinishResult:
-    if tool_request.args.strip():
+    if tool_call.args.strip():
         trace_finish_event(
             "failed",
             "finish_validation",

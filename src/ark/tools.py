@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .guards import resolve_tool_path
 from .inputs import AgentConfig, create_workspace_snapshot
-from .protocol import ToolRequest, parse_edit_file_request
+from .protocol import ToolCall, parse_edit_file_request
 from .traces import trace_edit_event, trace_test_event
 
 
@@ -228,17 +228,17 @@ def edit_file(action_input: str, config: AgentConfig) -> str:
     return f"Edit applied successfully to {edit.path}."
 
 
-def should_skip_redundant_tool_request(
-    request: ToolRequest,
-    previous_request: ToolRequest | None = None,
+def should_skip_redundant_tool_call(
+    tool_call: ToolCall,
+    previous_call: ToolCall | None = None,
 ) -> str | None:
-    if previous_request is None:
+    if previous_call is None:
         return None
 
     if (
-        request.name == "read_file"
-        and previous_request.name == "read_file"
-        and request.args.strip() == previous_request.args.strip()
+        tool_call.name == "read_file"
+        and previous_call.name == "read_file"
+        and tool_call.args.strip() == previous_call.args.strip()
     ):
         return REDUNDANT_READ_FILE_MESSAGE
 
@@ -246,26 +246,26 @@ def should_skip_redundant_tool_request(
 
 
 def run_tool(
-    request: ToolRequest,
+    tool_call: ToolCall,
     config: AgentConfig,
-    previous_request: ToolRequest | None = None,
+    previous_call: ToolCall | None = None,
 ) -> ToolResult:
     workspace_path = config.workspace_path
-    skipped_reason = should_skip_redundant_tool_request(request, previous_request)
+    skipped_reason = should_skip_redundant_tool_call(tool_call, previous_call)
     if skipped_reason is not None:
         return ToolResult(skipped_reason, note="skipped: redundant")
 
-    if request.name == "list_files":
-        return ToolResult(list_files(request.args, workspace_path))
-    if request.name == "read_file":
-        return ToolResult(read_file(request.args, workspace_path))
-    if request.name == "find_text":
-        return ToolResult(find_text(request.args, workspace_path))
-    if request.name == "run_tests":
+    if tool_call.name == "list_files":
+        return ToolResult(list_files(tool_call.args, workspace_path))
+    if tool_call.name == "read_file":
+        return ToolResult(read_file(tool_call.args, workspace_path))
+    if tool_call.name == "find_text":
+        return ToolResult(find_text(tool_call.args, workspace_path))
+    if tool_call.name == "run_tests":
         return ToolResult(run_tests(workspace_path))
-    if request.name == "edit_file":
-        return ToolResult(edit_file(request.args, config))
+    if tool_call.name == "edit_file":
+        return ToolResult(edit_file(tool_call.args, config))
 
     return ToolResult(
-        f"Unsupported action '{request.name}'. Use list_files, read_file, find_text, run_tests, edit_file, or finish."
+        f"Unsupported action '{tool_call.name}'. Use list_files, read_file, find_text, run_tests, edit_file, or finish."
     )

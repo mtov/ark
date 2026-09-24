@@ -5,7 +5,7 @@ from time import perf_counter
 
 from .cli_output import (
     print_failure_summary,
-    print_tool_request,
+    print_tool_call,
     print_success_summary,
 )
 from .finish_handler import apply_finish
@@ -17,8 +17,8 @@ from .inputs import (
     rollback_workspace_changes,
 )
 from .memory import Memory
-from .models import call_model
-from .protocol import ToolRequest, parse_response, repair_response
+from .models import call_model_api
+from .protocol import ToolCall, parse_response, repair_response
 from .test_failures import summarize_test_failure_output
 from .tools import run_tool
 from .traces import (
@@ -48,72 +48,71 @@ class LoopResult:
     def success(
         cls,
         output: str,
-        *,
-        tools_called: list[str] | None = None,
+        memory: Memory,
     ) -> LoopResult:
         return cls(
             status="success",
             output=output,
-            tools_called=tools_called or [],
+            tools_called=memory.tools_called.copy(),
         )
 
     @classmethod
-    def max_iterations_reached(cls, *, tools_called: list[str] | None = None) -> LoopResult:
+    def max_iterations_reached(cls, memory: Memory) -> LoopResult:
         return cls(
             status="max_iterations_reached",
             error=MAX_ITERATIONS_REACHED_MESSAGE,
-            tools_called=tools_called or [],
+            tools_called=memory.tools_called.copy(),
         )
 
     @classmethod
-    def failure(cls, error: Exception, *, tools_called: list[str]) -> LoopResult:
+    def failure(cls, error: Exception, memory: Memory) -> LoopResult:
         return cls(
             status="failed",
             error=str(error),
             error_type=error.__class__.__name__,
-            tools_called=tools_called,
+            tools_called=memory.tools_called.copy(),
         )
 
 
-def get_next_tool_request(config: AgentConfig, memory: Memory) -> ToolRequest:
+def invoke_model(config: AgentConfig, memory: Memory) -> ToolCall:
     user_message = (
         "User task:\n"
         f"{config.user_prompt}\n\n"
         "Agent history:\n"
         f"{memory.to_text()}"
     )
-    model_response = call_model(config, user_message)
+    model_response = call_model_api(config, user_message)
 
     try:
-        tool_request = parse_response(model_response.content)
+        tool_call = parse_response(model_response.content)
     except ValueError as exc:
         trace_validation_error(str(exc), model_response.content)
-        tool_request = repair_response(config, user_message, str(exc))
+        tool_call = repair_response(config, user_message, str(exc))
 
-    trace_action(tool_request)
-    memory.record_tool_call(tool_request.name)
-    return tool_request
+    trace_action(tool_call)
+    memory.record_tool_call(tool_call.name)
+    return tool_call
 
 
 def handle_finish(
     config: AgentConfig,
     memory: Memory,
     iteration: int,
-    tool_request: ToolRequest,
+    tool_call: ToolCall,
 ) -> str | None:
     if not memory.has_successful_edit():
-        print_tool_request(iteration, tool_request)
+        print_tool_call(iteration, tool_call)
         trace_finish_event("failed", "finish_validation", FINISH_WITHOUT_EDIT_MESSAGE)
-        memory.append(iteration, tool_request, FINISH_WITHOUT_EDIT_MESSAGE)
+        memory.append(iteration, tool_call, FINISH_WITHOUT_EDIT_MESSAGE)
         return None
 
-    finish_result = apply_finish(config, tool_request)
-    print_tool_request(iteration, tool_request)
+    finish_result = apply_finish(config, tool_call)
+    print_tool_call(iteration, tool_call)
 
     if finish_result.status == "invalid_finish":
         memory.append(
             iteration,
-            tool_request,
+            tool_call,
             "Finish action must have an empty Action Input.",
         )
         return None
@@ -122,7 +121,7 @@ def handle_finish(
     if finish_result.status == "post_apply_tests_failed":
         memory.append(
             iteration,
-            tool_request,
+            tool_call,
             summarize_test_failure_output(finish_result.test_output or ""),
         )
         return None
@@ -134,34 +133,30 @@ def agentic_loop(config: AgentConfig) -> LoopResult:
     memory = Memory()
     try:
         for iteration in range(1, MAX_ITERATIONS + 1):
-            tool_request = get_next_tool_request(config, memory)
+            tool_call = invoke_model(config, memory)
 
-            if tool_request.name == "finish":
+            if tool_call.name == "finish":
                 finish_output = handle_finish(
                     config,
                     memory,
                     iteration,
-                    tool_request,
+                    tool_call,
                 )
                 if finish_output is None:
                     continue
 
                 commit_workspace_changes(config)
-                return LoopResult.success(
-                    finish_output,
-                    tools_called=memory.tools_called,
-                )
+                return LoopResult.success(finish_output, memory)
 
-            previous_request = memory.last_tool_request()
-            tool_result = run_tool(tool_request, config, previous_request)
-            print_tool_request(iteration, tool_request, tool_result.note)
-            memory.append(iteration, tool_request, tool_result.output)
+            tool_result = run_tool(tool_call, config, memory.last_tool_call())
+            print_tool_call(iteration, tool_call, tool_result.note)
+            memory.append(iteration, tool_call, tool_result.output)
 
         rollback_workspace_changes(config, MAX_ITERATIONS_REACHED_MESSAGE)
-        return LoopResult.max_iterations_reached(tools_called=memory.tools_called)
+        return LoopResult.max_iterations_reached(memory)
     except Exception as exc:  # noqa: BLE001
         rollback_workspace_changes(config, AGENTIC_LOOP_ERROR_MESSAGE)
-        return LoopResult.failure(exc, tools_called=memory.tools_called)
+        return LoopResult.failure(exc, memory)
 
 
 def main() -> int:

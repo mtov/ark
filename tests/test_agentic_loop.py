@@ -5,16 +5,17 @@ from pathlib import Path
 from ark.agentic_loop import (
     FINISH_SUCCESS_MESSAGE,
     FINISH_WITHOUT_EDIT_MESSAGE,
+    LoopResult,
     MAX_ITERATIONS_REACHED_MESSAGE,
     Memory,
     agentic_loop,
-    get_next_tool_request,
     handle_finish,
+    invoke_model,
 )
 from ark.finish_handler import ApplyFinishResult
 from ark.inputs import AgentConfig
 from ark.models import ModelConfig, build_model_response
-from ark.protocol import ToolRequest
+from ark.protocol import ToolCall
 from ark.tools import ToolResult
 
 
@@ -28,76 +29,85 @@ def build_context(tmp_path: Path) -> AgentConfig:
     )
 
 
-def request_sequence(*requests: ToolRequest):
-    responses = iter(requests)
+def tool_call_sequence(*tool_calls: ToolCall):
+    responses = iter(tool_calls)
 
-    def next_request(_config: AgentConfig, memory: Memory) -> ToolRequest:
-        request = next(responses)
-        memory.record_tool_call(request.name)
-        return request
+    def next_tool_call(_config: AgentConfig, memory: Memory) -> ToolCall:
+        tool_call = next(responses)
+        memory.record_tool_call(tool_call.name)
+        return tool_call
 
-    return next_request
+    return next_tool_call
 
 
-def test_get_next_tool_request_records_tool_call(monkeypatch, tmp_path: Path) -> None:
+def test_loop_result_copies_tool_calls_from_memory() -> None:
+    memory = Memory(tools_called=["read_file"])
+
+    result = LoopResult.success("done", memory)
+    memory.record_tool_call("finish")
+
+    assert result.tools_called == ["read_file"]
+
+
+def test_invoke_model_records_tool_call(monkeypatch, tmp_path: Path) -> None:
     memory = Memory()
     monkeypatch.setattr(
-        "ark.agentic_loop.call_model",
+        "ark.agentic_loop.call_model_api",
         lambda *_args: build_model_response(
             "Thought: inspect\nAction: read_file\nAction Input: example.py"
         ),
     )
     monkeypatch.setattr("ark.agentic_loop.trace_action", lambda _request: None)
 
-    request = get_next_tool_request(build_context(tmp_path), memory)
+    tool_call = invoke_model(build_context(tmp_path), memory)
 
-    assert request.name == "read_file"
+    assert tool_call.name == "read_file"
     assert memory.tools_called == ["read_file"]
 
 
-def test_get_next_tool_request_records_repaired_tool_call(monkeypatch, tmp_path: Path) -> None:
+def test_invoke_model_records_repaired_tool_call(monkeypatch, tmp_path: Path) -> None:
     memory = Memory()
-    repaired_request = ToolRequest("recover", "list_files", ".")
+    repaired_call = ToolCall("recover", "list_files", ".")
     monkeypatch.setattr(
-        "ark.agentic_loop.call_model",
+        "ark.agentic_loop.call_model_api",
         lambda *_args: build_model_response("Thought: invalid"),
     )
     monkeypatch.setattr(
         "ark.agentic_loop.repair_response",
-        lambda *_args: repaired_request,
+        lambda *_args: repaired_call,
     )
     monkeypatch.setattr("ark.agentic_loop.trace_validation_error", lambda *_args: None)
     monkeypatch.setattr("ark.agentic_loop.trace_action", lambda _request: None)
 
-    request = get_next_tool_request(build_context(tmp_path), memory)
+    tool_call = invoke_model(build_context(tmp_path), memory)
 
-    assert request is repaired_request
+    assert tool_call is repaired_call
     assert memory.tools_called == ["list_files"]
 
 
 def test_finish_retries_after_failed_tests_without_resetting_workspace(monkeypatch, tmp_path: Path) -> None:
     context = build_context(tmp_path)
     responses = iter([
-        ToolRequest("first finish", "finish", ""),
-        ToolRequest("second finish", "finish", ""),
+        ToolCall("first finish", "finish", ""),
+        ToolCall("second finish", "finish", ""),
     ])
     seen_histories: list[str] = []
     attempts = 0
 
-    def next_request(_config: AgentConfig, memory: Memory) -> ToolRequest:
+    def next_tool_call(_config: AgentConfig, memory: Memory) -> ToolCall:
         nonlocal attempts
         attempts += 1
         seen_histories.append(memory.to_text())
-        request = next(responses)
-        memory.record_tool_call(request.name)
-        return request
+        tool_call = next(responses)
+        memory.record_tool_call(tool_call.name)
+        return tool_call
 
-    def finish(_config: AgentConfig, _request: ToolRequest) -> ApplyFinishResult:
+    def finish(_config: AgentConfig, _tool_call: ToolCall) -> ApplyFinishResult:
         if attempts == 1:
             return ApplyFinishResult("post_apply_tests_failed", "1 failed")
         return ApplyFinishResult("completed")
 
-    monkeypatch.setattr("ark.agentic_loop.get_next_tool_request", next_request)
+    monkeypatch.setattr("ark.agentic_loop.invoke_model", next_tool_call)
     monkeypatch.setattr("ark.agentic_loop.apply_finish", finish)
     monkeypatch.setattr(Memory, "has_successful_edit", lambda _memory: True)
 
@@ -111,14 +121,14 @@ def test_finish_retries_after_failed_tests_without_resetting_workspace(monkeypat
 
 def test_finish_requires_an_approved_edit(monkeypatch, tmp_path: Path) -> None:
     memory = Memory()
-    finish_request = ToolRequest("done", "finish", "")
-    apply_calls: list[ToolRequest] = []
+    finish_call = ToolCall("done", "finish", "")
+    apply_calls: list[ToolCall] = []
     monkeypatch.setattr(
         "ark.agentic_loop.apply_finish",
-        lambda _config, request: apply_calls.append(request),
+        lambda _config, tool_call: apply_calls.append(tool_call),
     )
 
-    result = handle_finish(build_context(tmp_path), memory, 1, finish_request)
+    result = handle_finish(build_context(tmp_path), memory, 1, finish_call)
 
     assert result is None
     assert apply_calls == []
@@ -130,17 +140,17 @@ def test_approved_edit_is_kept_after_successful_finish(monkeypatch, tmp_path: Pa
     file_path = tmp_path / "example.py"
     file_path.write_text("value = old\n", encoding="utf-8")
     responses = iter([
-        ToolRequest(
+        ToolCall(
             "edit",
             "edit_file",
             "path: example.py\nold:\n```\nvalue = old\n```\nnew:\n```\nvalue = new\n```",
         ),
-        ToolRequest("done", "finish", ""),
+        ToolCall("done", "finish", ""),
     ])
     monkeypatch.setattr("builtins.input", lambda _prompt: "y")
     monkeypatch.setattr(
-        "ark.agentic_loop.get_next_tool_request",
-        request_sequence(*responses),
+        "ark.agentic_loop.invoke_model",
+        tool_call_sequence(*responses),
     )
     monkeypatch.setattr("ark.agentic_loop.apply_finish", lambda *_args: ApplyFinishResult("completed"))
 
@@ -164,8 +174,8 @@ def test_max_iterations_rolls_back_transaction(monkeypatch, tmp_path: Path) -> N
     file_path.write_text("new\n", encoding="utf-8")
 
     monkeypatch.setattr(
-        "ark.agentic_loop.get_next_tool_request",
-        request_sequence(ToolRequest("explore", "list_files", ".")),
+        "ark.agentic_loop.invoke_model",
+        tool_call_sequence(ToolCall("explore", "list_files", ".")),
     )
     monkeypatch.setattr("ark.agentic_loop.MAX_ITERATIONS", 1)
     monkeypatch.setattr(
@@ -184,7 +194,7 @@ def test_max_iterations_rolls_back_transaction(monkeypatch, tmp_path: Path) -> N
 def test_agentic_loop_returns_failure_with_tool_history(monkeypatch, tmp_path: Path) -> None:
     context = build_context(tmp_path)
     monkeypatch.setattr(
-        "ark.agentic_loop.get_next_tool_request",
+        "ark.agentic_loop.invoke_model",
         lambda _config, _memory: (_ for _ in ()).throw(ValueError("missing content")),
     )
 
@@ -199,13 +209,13 @@ def test_agentic_loop_returns_failure_with_tool_history(monkeypatch, tmp_path: P
 def test_redundant_consecutive_read_is_still_skipped(monkeypatch, tmp_path: Path) -> None:
     context = build_context(tmp_path)
     responses = iter([
-        ToolRequest("read", "read_file", "example.py"),
-        ToolRequest("read again", "read_file", "example.py"),
-        ToolRequest("done", "finish", ""),
+        ToolCall("read", "read_file", "example.py"),
+        ToolCall("read again", "read_file", "example.py"),
+        ToolCall("done", "finish", ""),
     ])
     monkeypatch.setattr(
-        "ark.agentic_loop.get_next_tool_request",
-        request_sequence(*responses),
+        "ark.agentic_loop.invoke_model",
+        tool_call_sequence(*responses),
     )
     monkeypatch.setattr("ark.agentic_loop.apply_finish", lambda *_args: ApplyFinishResult("completed"))
     monkeypatch.setattr(Memory, "has_successful_edit", lambda _memory: True)

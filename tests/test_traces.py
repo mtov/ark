@@ -4,7 +4,7 @@ from pathlib import Path
 
 from ark import traces
 from ark.models import TokenUsage
-from ark.protocol import ToolRequest
+from ark.protocol import ToolCall
 
 
 def test_record_response_usage_accumulates_total_tokens(
@@ -67,7 +67,7 @@ def test_trace_action_uses_one_line_for_action_and_arguments(monkeypatch, tmp_pa
     traces.clear_trace()
     traces.record_response_usage()
     traces.trace_action(
-        ToolRequest(
+        ToolCall(
             thought="Inspect the implementation.",
             name="read_file",
             args="src/products.py",
@@ -89,7 +89,7 @@ def test_trace_action_records_edit_details_separately(monkeypatch, tmp_path: Pat
     traces.clear_trace()
     traces.record_response_usage()
     traces.trace_action(
-        ToolRequest(
+        ToolCall(
             thought="Edit the file.",
             name="edit_file",
             args="path: file.py\nold:\n```\nold\n```\nnew:\n```\nnew\n```",

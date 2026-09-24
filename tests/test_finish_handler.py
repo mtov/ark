@@ -5,7 +5,7 @@ from pathlib import Path
 from ark.finish_handler import INVALID_FINISH_MESSAGE, apply_finish
 from ark.inputs import AgentConfig
 from ark.models import ModelConfig
-from ark.protocol import ToolRequest
+from ark.protocol import ToolCall
 
 
 def build_context(tmp_path: Path) -> AgentConfig:
@@ -23,7 +23,7 @@ def test_finish_runs_final_tests(monkeypatch, tmp_path: Path) -> None:
     events: list[tuple[str, str, str | None]] = []
     monkeypatch.setattr("ark.finish_handler.trace_finish_event", lambda *args: events.append(args))
 
-    result = apply_finish(build_context(tmp_path), ToolRequest("done", "finish", ""))
+    result = apply_finish(build_context(tmp_path), ToolCall("done", "finish", ""))
 
     assert result.status == "completed"
     assert events == [("completed", "finish")]
@@ -32,14 +32,14 @@ def test_finish_runs_final_tests(monkeypatch, tmp_path: Path) -> None:
 def test_finish_returns_failed_tests_without_reverting_edits(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr("ark.finish_handler.run_tests_with_status", lambda _path: (False, "1 failed"))
 
-    result = apply_finish(build_context(tmp_path), ToolRequest("done", "finish", ""))
+    result = apply_finish(build_context(tmp_path), ToolCall("done", "finish", ""))
 
     assert result.status == "post_apply_tests_failed"
     assert result.test_output == "1 failed"
 
 
 def test_finish_rejects_nonempty_input(tmp_path: Path) -> None:
-    result = apply_finish(build_context(tmp_path), ToolRequest("done", "finish", "patch"))
+    result = apply_finish(build_context(tmp_path), ToolCall("done", "finish", "patch"))
 
     assert result.status == "invalid_finish"
     assert INVALID_FINISH_MESSAGE == "Finish action must have an empty Action Input."

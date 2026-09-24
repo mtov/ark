@@ -276,7 +276,7 @@ def call_ollama(config: AgentConfig, user_prompt: str) -> ModelResponse:
     )
 
 
-def call_model(
+def call_model_api(
     config: AgentConfig,
     user_prompt: str,
 ) -> ModelResponse:

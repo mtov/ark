@@ -4,7 +4,7 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .models import call_model
+from .models import call_model_api
 from .traces import trace_repair_attempt
 
 if TYPE_CHECKING:
@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
 
 @dataclass
-class ToolRequest:
+class ToolCall:
     thought: str
     name: str
     args: str
@@ -39,7 +39,7 @@ EDIT_FILE_PATTERN = re.compile(
     re.DOTALL,
 )
 
-def parse_response(text: str) -> ToolRequest:
+def parse_response(text: str) -> ToolCall:
     thought = ""
     action = ""
     action_input_lines: list[str] = []
@@ -64,7 +64,7 @@ def parse_response(text: str) -> ToolRequest:
         raise ValueError("Model response is missing the required Action field.")
 
     action_input = "\n".join(action_input_lines).strip()
-    return ToolRequest(thought=thought, name=action, args=action_input)
+    return ToolCall(thought=thought, name=action, args=action_input)
 
 
 def parse_edit_file_request(text: str) -> EditFileRequest:
@@ -81,8 +81,8 @@ def parse_edit_file_request(text: str) -> EditFileRequest:
     )
 
 
-def repair_response(config: AgentConfig, user_message: str, reason: str) -> ToolRequest:
+def repair_response(config: AgentConfig, user_message: str, reason: str) -> ToolCall:
     trace_repair_attempt("Protocol repair", reason)
     repair_message = f"{user_message}\n\n{REPAIR_PROMPT}"
-    response = call_model(config, repair_message)
+    response = call_model_api(config, repair_message)
     return parse_response(response.content)

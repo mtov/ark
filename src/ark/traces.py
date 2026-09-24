@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from .models import TokenUsage
-    from .protocol import ToolRequest
+    from .protocol import ToolCall
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 LOG_PATH = PROJECT_ROOT / "agent_trace.log"
@@ -71,9 +71,9 @@ def _edit_path(action_input: str) -> str | None:
     return None
 
 
-def _format_action(tool_request: ToolRequest) -> str:
-    args = tool_request.args.strip()
-    action = tool_request.name
+def _format_action(tool_call: ToolCall) -> str:
+    args = tool_call.args.strip()
+    action = tool_call.name
     if action == "list_files":
         return f"{action} {args or '.'}"
     if action == "edit_file":
@@ -85,10 +85,10 @@ def _format_action(tool_request: ToolRequest) -> str:
     return action
 
 
-def trace_action(tool_request: ToolRequest) -> None:
+def trace_action(tool_call: ToolCall) -> None:
     lines = [
-        f"thought: {tool_request.thought}",
-        f"action: {_format_action(tool_request)}",
+        f"thought: {tool_call.thought}",
+        f"action: {_format_action(tool_call)}",
     ]
     _append_event(f"response {RESPONSE_COUNT}", lines)
 
