@@ -79,3 +79,13 @@ def test_agent_history_contains_tool_uses_structured_entries() -> None:
 
     assert history.contains_tool("find_text") is True
     assert history.contains_tool("run_tests") is False
+
+
+def test_memory_records_tool_calls_in_order() -> None:
+    history = Memory()
+
+    history.record_tool_call("read_file")
+    history.record_tool_call("finish")
+    history.record_tool_call("run_tests")
+
+    assert history.tools_called == ["read_file", "finish", "run_tests"]

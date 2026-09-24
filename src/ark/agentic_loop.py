@@ -30,6 +30,7 @@ from .traces import (
 )
 
 MAX_ITERATIONS_REACHED_MESSAGE = "Agent stopped after reaching the maximum number of steps."
+AGENTIC_LOOP_ERROR_MESSAGE = "agentic loop error"
 MAX_ITERATIONS = 20
 FINISH_SUCCESS_MESSAGE = "Changes applied and final tests passed."
 FINISH_WITHOUT_EDIT_MESSAGE = "Finish requires at least one approved edit_file action."
@@ -90,6 +91,7 @@ def get_next_tool_request(config: AgentConfig, memory: Memory) -> ToolRequest:
         tool_request = repair_response(config, user_message, str(exc))
 
     trace_action(tool_request)
+    memory.record_tool_call(tool_request.name)
     return tool_request
 
 
@@ -98,7 +100,6 @@ def handle_finish(
     memory: Memory,
     iteration: int,
     tool_request: ToolRequest,
-    tools_called: list[str],
 ) -> str | None:
     if not memory.has_successful_edit():
         print_tool_request(iteration, tool_request)
@@ -117,7 +118,7 @@ def handle_finish(
         )
         return None
 
-    tools_called.append("run_tests")
+    memory.record_tool_call("run_tests")
     if finish_result.status == "post_apply_tests_failed":
         memory.append(
             iteration,
@@ -130,13 +131,10 @@ def handle_finish(
 
 
 def agentic_loop(config: AgentConfig) -> LoopResult:
-    tools_called: list[str] = []
+    memory = Memory()
     try:
-        memory = Memory()
-
         for iteration in range(1, MAX_ITERATIONS + 1):
             tool_request = get_next_tool_request(config, memory)
-            tools_called.append(tool_request.name)
 
             if tool_request.name == "finish":
                 finish_output = handle_finish(
@@ -144,7 +142,6 @@ def agentic_loop(config: AgentConfig) -> LoopResult:
                     memory,
                     iteration,
                     tool_request,
-                    tools_called,
                 )
                 if finish_output is None:
                     continue
@@ -152,7 +149,7 @@ def agentic_loop(config: AgentConfig) -> LoopResult:
                 commit_workspace_changes(config)
                 return LoopResult.success(
                     finish_output,
-                    tools_called=tools_called,
+                    tools_called=memory.tools_called,
                 )
 
             previous_request = memory.last_tool_request()
@@ -161,10 +158,10 @@ def agentic_loop(config: AgentConfig) -> LoopResult:
             memory.append(iteration, tool_request, tool_result.output)
 
         rollback_workspace_changes(config, MAX_ITERATIONS_REACHED_MESSAGE)
-        return LoopResult.max_iterations_reached(tools_called=tools_called)
+        return LoopResult.max_iterations_reached(tools_called=memory.tools_called)
     except Exception as exc:  # noqa: BLE001
-        rollback_workspace_changes(config, "agentic loop error")
-        return LoopResult.failure(exc, tools_called=tools_called)
+        rollback_workspace_changes(config, AGENTIC_LOOP_ERROR_MESSAGE)
+        return LoopResult.failure(exc, tools_called=memory.tools_called)
 
 
 def main() -> int:

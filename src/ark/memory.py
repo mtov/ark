@@ -18,9 +18,13 @@ class MemoryEntry:
 @dataclass
 class Memory:
     entries: list[MemoryEntry] = field(default_factory=list)
+    tools_called: list[str] = field(default_factory=list)
 
     def append(self, iteration: int, request: ToolRequest, result: str) -> None:
         self.entries.append(MemoryEntry(iteration, request, result))
+
+    def record_tool_call(self, name: str) -> None:
+        self.tools_called.append(name)
 
     def contains_tool(self, name: str) -> bool:
         return any(entry.tool_request.name == name for entry in self.entries)
@@ -77,7 +81,6 @@ class Memory:
             sections.append("Searches already run:\n" + "\n".join(f"- {query}" for query in find_queries))
         if self.contains_tool("run_tests"):
             sections.append("Tests already run: yes")
-
         formatted_entries = []
         for entry in self.entries[-MAX_HISTORY_ENTRIES:]:
             result = entry.result.strip()

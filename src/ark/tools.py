@@ -12,6 +12,7 @@ from .inputs import AgentConfig, create_workspace_snapshot
 from .protocol import ToolRequest, parse_edit_file_request
 from .traces import trace_edit_event, trace_test_event
 
+
 MAX_FIND_TEXT_MATCHES = 20
 SKIPPED_DIRECTORIES = {".git", ".venv", "__pycache__"}
 TEST_COMMAND = (sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider")
