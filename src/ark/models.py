@@ -37,6 +37,11 @@ class ModelResponse:
 
 
 MAX_RESPONSE_DEBUG_CHARS = 2_000
+MAX_EMPTY_RESPONSE_RETRIES = 1
+
+
+class EmptyModelResponseError(ValueError):
+    pass
 
 
 def require_config_value(value: str | None, key: str, model_name: str) -> str:
@@ -109,11 +114,14 @@ def extract_openai_content(response: object) -> str:
     finish_reason = _response_field(first_choice, "finish_reason")
     refusal = _response_field(message, "refusal")
     serialized_response = _serialize_response_for_error(response)
-    raise ValueError(
+    error_message = (
         "OpenAI-compatible model returned a response without message content. "
         f"finish_reason={finish_reason!r}; refusal={refusal!r}; "
         f"response={serialized_response}"
     )
+    if refusal is None:
+        raise EmptyModelResponseError(error_message)
+    raise ValueError(error_message)
 
 
 def extract_openai_usage(response: object) -> TokenUsage:
@@ -168,24 +176,33 @@ def call_openai_compatible(config: AgentConfig, user_prompt: str) -> ModelRespon
         timeout=config.model_config.timeout_seconds,
     )
 
-    try:
-        response = client.chat.completions.create(
-            model=openai_model,
-            messages=[
-                {"role": "system", "content": config.system_prompt},
-                {"role": "user", "content": user_prompt},
-            ],
-        )
-    except Exception as exc:  # noqa: BLE001
-        base_url = config.model_config.openai_base_url or "default OpenAI endpoint"
-        raise RuntimeError(
-            f"OpenAI-compatible request failed for {base_url}: {exc.__class__.__name__}: {exc}"
-        ) from exc
+    for attempt in range(MAX_EMPTY_RESPONSE_RETRIES + 1):
+        try:
+            response = client.chat.completions.create(
+                model=openai_model,
+                messages=[
+                    {"role": "system", "content": config.system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+            )
+        except Exception as exc:  # noqa: BLE001
+            base_url = config.model_config.openai_base_url or "default OpenAI endpoint"
+            raise RuntimeError(
+                f"OpenAI-compatible request failed for {base_url}: {exc.__class__.__name__}: {exc}"
+            ) from exc
 
-    return build_model_response(
-        extract_openai_content(response),
-        extract_openai_usage(response),
-    )
+        usage = extract_openai_usage(response)
+        try:
+            content = extract_openai_content(response)
+        except EmptyModelResponseError:
+            record_response_usage(usage)
+            if attempt < MAX_EMPTY_RESPONSE_RETRIES:
+                continue
+            raise
+
+        return build_model_response(content, usage)
+
+    raise RuntimeError("Model retry loop ended unexpectedly.")
 
 
 def extract_ollama_content(response: object) -> str:

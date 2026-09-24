@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from .protocol import ToolCall
 
 MAX_HISTORY_ENTRIES = 4
-MAX_OBSERVATION_CHARS = 1200
+MAX_OBSERVATION_CHARS = 8000
 
 
 @dataclass
