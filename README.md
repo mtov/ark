@@ -4,25 +4,54 @@
   <img src="ark.png" alt="Ark logo" width="160">
 </p>
 
-Ark is a small, didactic coding agent for studying agent loops, constrained workspace tools, user-approved edits, and test-based validation. It is an ongoing research project developed by [ASERG](https://aserg.labsoft.dcc.ufmg.br/) at DCC/UFMG. See the [paper](https://arxiv.org/abs/2608.10934) for additional context.
+Ark is a small, didactic coding agent for studying how language models inspect code, propose changes, and validate them with tests. It is an ongoing research project developed by [ASERG](https://aserg.labsoft.dcc.ufmg.br/) at DCC/UFMG. See the [paper](https://arxiv.org/abs/2608.10934) for additional context.
 
-## Overview
+## 1. Goal
 
-For each run, Ark copies a task workspace into `ark-workspace`, where the model can inspect files, run tests, and propose exact replacements in existing files. Ark previews each replacement as a diff and applies it only after user approval. The model may run tests during the loop and uses `finish` to request completion validation.
+Ark makes the core mechanics of a coding agent easy to inspect and experiment with. Its focus is not feature breadth, but a clear implementation of the agent loop:
 
-Ark is intentionally narrow. It is designed for experiments and small curated tasks, not as a general-purpose autonomous coding environment.
+1. Give a model a programming task and a local workspace.
+2. Let it inspect files and run tests through a small set of constrained tools.
+3. Ask for user approval before changing a file.
+4. Run the tests before accepting the result.
+5. Record the complete interaction in a readable trace.
 
-## Quick Start
+Ark is intended for research, teaching, and small curated benchmarks. It is not a general-purpose autonomous development environment or an operating-system security sandbox.
+
+## 2. Running Ark
+
+### Requirements
+
+- Python 3.11 or newer.
+- An OpenAI API key, an OpenAI-compatible endpoint, or a local Ollama server.
+- A task workspace containing a `prompt.txt` file, source code, and Pytest tests.
+
+### Installation
+
+From the project root:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
+```
+
+Ark runs task tests with the same Python environment. Install any task-specific dependencies in this virtual environment as well.
+
+### OpenAI
+
+The default configuration in `config/config.json` uses the OpenAI API. Export your key and pass a task workspace to Ark:
+
+```bash
 export OPENAI_API_KEY="your_key_here"
 python run_ark.py ./test_workspace/bugfix_001_date_range
 ```
 
-The default configuration targets the OpenAI API. To use another OpenAI-compatible endpoint, set `openai_base_url` in `config/config.json`. To use Ollama, set `model` to `ollama` and provide `ollama_model`:
+To use another OpenAI-compatible service, set `openai_base_url`, `openai_model`, and, when necessary, `openai_api_key_env` in `config/config.json`.
+
+### Ollama
+
+To run with Ollama, start the Ollama server, make sure the selected model is available, and update `config/config.json`:
 
 ```json
 {
@@ -33,29 +62,79 @@ The default configuration targets the OpenAI API. To use another OpenAI-compatib
 }
 ```
 
-`pytest` must be installed in the Python environment that runs Ark.
+Then run the same command:
 
-## Workspace
+```bash
+python run_ark.py ./test_workspace/bugfix_001_date_range
+```
 
-The command-line argument identifies the source workspace. It must contain:
+### During a run
 
-- `prompt.txt`, describing the task.
-- Project files that Ark may inspect and edit.
-- Tests runnable from the workspace root.
+Ark copies the supplied task into `ark-workspace` and works only on that copy. Whenever the model proposes an edit, Ark prints a unified diff and asks:
 
-`AGENTS.md` is optional. When present, Ark appends it to the task context as workspace-specific guidance.
+```text
+Authorize edit? [y/N]:
+```
 
-Ark copies the source workspace to `ark-workspace` before each run and excludes `evaluation/` from that copy. All reads, edits, and tests operate only on this copied runtime workspace; Ark never modifies the source workspace.
+Only `y` or `yes` applies the change. When the run succeeds, the final files remain in `ark-workspace`; the original task directory is never modified. The full execution trace is written to `agent_trace.log`.
 
-Tests run with:
+### Task workspace format
+
+A task directory should look like this:
+
+```text
+my-task/
+├── prompt.txt
+├── src/
+│   └── ...
+└── tests/
+    └── ...
+```
+
+- `prompt.txt` contains the task given to the model.
+- Source and test files are available to the agent inside the copied workspace.
+- `AGENTS.md` is optional and adds task-specific instructions to the prompt.
+- `evaluation/` is intentionally excluded from the runtime copy, so private evaluation tests are not visible to the agent.
+
+Tests are always run from the workspace root with:
 
 ```bash
 python -m pytest -q -p no:cacheprovider
 ```
 
-## Agent Protocol
+## 3. Architecture
 
-The model must return exactly one action per turn:
+At a high level, one run follows this flow:
+
+```text
+task workspace
+      |
+      v
+copy to ark-workspace
+      |
+      v
+model response -> parse one tool call -> execute tool -> store observation
+      ^                                              |
+      |______________________________________________|
+      |
+      v
+finish -> run tests -> keep changes or continue/rollback
+```
+
+The main modules are deliberately small and have distinct responsibilities:
+
+- `inputs.py` loads configuration and prompts, prepares `ark-workspace`, and manages workspace snapshots.
+- `agentic_loop.py` coordinates model calls, tool execution, completion, and rollback.
+- `models.py` provides the OpenAI-compatible and Ollama integrations.
+- `protocol.py` parses and validates the model's requested action.
+- `tools.py` implements workspace inspection, test execution, and approved edits.
+- `memory.py` builds the compact history sent with the next model request.
+- `finish_handler.py` validates completion and runs the final tests.
+- `traces.py` records the execution in `agent_trace.log`.
+
+## Agent loop
+
+The model returns exactly one action per iteration:
 
 ```text
 Thought: brief reasoning
@@ -63,28 +142,24 @@ Action: tool_name
 Action Input: tool-specific input
 ```
 
-Ark generates tool results and adds them to the next model request as observations. The model must not generate `Observation`.
+Ark executes the action, adds its result to memory as an observation, and calls the model again. If the response does not follow the protocol, Ark makes one repair request.
 
-| Action | Action Input | Effect |
+The available actions are:
+
+| Action | Input | Purpose |
 | --- | --- | --- |
-| `list_files` | Relative directory; blank means `.` | Lists directory entries. |
-| `read_file` | Relative file path | Returns UTF-8 file contents. |
-| `find_text` | `search text | directory` | Searches files under a directory. |
-| `run_tests` | Blank | Runs the fixed pytest command. |
-| `edit_file` | `path`, `old`, and `new` blocks | Proposes one exact file replacement. |
-| `finish` | Blank | Runs final tests and, on success, completes the run. |
+| `list_files` | Relative directory, or blank for `.` | List workspace entries. |
+| `read_file` | Relative file path | Read a UTF-8 file. |
+| `find_text` | `search text \| directory` | Search files below a directory. |
+| `run_tests` | Blank | Run the fixed Pytest command. |
+| `edit_file` | `path`, `old`, and `new` blocks | Propose one exact replacement. |
+| `finish` | Blank | Request final validation. |
 
-Tool paths are constrained to `ark-workspace`. Ark records files already read and searches already run in the model context, and skips an identical consecutive `read_file` request.
+All tool paths are restricted to `ark-workspace`. Ark also skips an identical consecutive `read_file` call to avoid wasting an iteration.
 
-## Context Memory
+## Edits and approval
 
-Each model request includes a compact history of the run. Ark retains the last four steps, truncating each observation to 1,200 characters. It also lists files already read, searches already run, and whether tests have run.
-
-For `edit_file`, the history retains only the edited path and result; it does not resend the complete `old` and `new` blocks. The applied diff remains available in `agent_trace.log`.
-
-## Editing
-
-The model does not generate patches. Instead, it uses `edit_file` to replace an exact block in an existing file:
+`edit_file` replaces one exact block in an existing file. For example:
 
 ````text
 path: src/orders.py
@@ -100,57 +175,24 @@ def subtotal(items):
 ```
 ````
 
-Before asking for approval, Ark verifies that:
+Before requesting approval, Ark checks that the path is inside the runtime workspace, the file exists, `old` occurs exactly once, and `new` is different. This version edits existing files only; it does not create or delete files.
 
-1. The path is inside `ark-workspace` and identifies an existing regular file.
-2. The request has the required `path`, `old`, and `new` structure.
-3. `old` occurs exactly once in the current file.
-4. `new` differs from `old`.
+The first approved edit creates a temporary snapshot. A successful `finish` keeps the runtime changes and discards the snapshot. Reaching the 20-iteration limit or encountering an unexpected loop error restores the runtime workspace from that snapshot.
 
-Ark then generates and prints a unified diff:
+## Memory and trace
 
-```text
-Authorize edit? [y/N]:
-```
+Each model request receives a compact summary rather than the entire raw conversation. Memory includes files already read, searches already made, whether tests have run, and the four most recent steps. Each observation is limited to 8,000 characters, and large `edit_file` inputs are represented only by their target path.
 
-Only `y` or `yes` applies the edit. Rejected, malformed, ambiguous, out-of-workspace, and no-op edits leave the workspace unchanged. This version supports edits to existing files only; it does not create or delete files.
+`agent_trace.log` is cleared at the beginning of each run and records:
 
-## Finishing And Rollback
+- The task prompt and parsed model actions.
+- Edit validation, approval outcomes, and diffs.
+- Test and finish results.
+- Protocol validation and repair attempts.
+- Errors, rollback events, elapsed time, token usage, and tool counts.
 
-`finish` is valid only with an empty `Action Input` and after at least one approved `edit_file` action. A valid finish runs the fixed test command.
-
-- If tests pass, Ark keeps the edited runtime workspace and reports success.
-- If tests fail, Ark returns a concise failure summary to the model and preserves approved edits so it can make corrective changes.
-- Ark allows at most 20 model iterations. Reaching this limit, or an unexpected execution error, restores the runtime workspace to its state before the first approved edit.
-
-The snapshot is created only when the first edit is approved and is discarded after a successful finish or rollback.
-
-## Trace
-
-Ark writes the most recent execution to `agent_trace.log`, clearing it at the start of each run. The relevant sections are:
-
-- `[request]`: task prompt.
-- `[response N]`: parsed model thought and requested action.
-- `[edit_file]`: validation result, generated diff, or rejection reason.
-- `[workspace]`: commit or rollback of approved workspace changes.
-- `[tests]`: result of a `run_tests` action requested by the model.
-- `[finish]`: finish validation or final-test outcome.
-- `[validation_error]` and `[repair_attempt]`: protocol failures and repair requests.
-- `[error]`: execution failure, including its stage and tools already called.
-- `[run_summary]`: token total, elapsed time, and per-tool call counts.
-
-`agent_trace.log` is intentionally excluded from Git.
-
-## Structure
-
-- `src/ark/agentic_loop.py`: main loop, completion handling, and transaction control.
-- `src/ark/memory.py`: action history and context summary for the next model turn.
-- `src/ark/tools.py`: workspace inspection, tests, and approved `edit_file` application.
-- `src/ark/protocol.py`: parsing and validation of model responses.
-- `src/ark/finish_handler.py`: final-test execution.
-- `src/ark/inputs.py`: configuration, prompts, runtime workspace, and snapshots.
-- `src/ark/traces.py`: execution trace output.
+The trace is intended to make agent behavior reproducible and easy to analyze. It is excluded from Git.
 
 ## Limits
 
-Ark is a cooperative local tool, not a security sandbox. It restricts its own paths and test command, but it does not provide OS-level isolation. It is best suited to small workspaces whose changes can be expressed as exact replacements.
+Ark constrains its own file paths and test command, but task tests still execute as local Python processes. Run only trusted task workspaces. Ark is best suited to small tasks whose changes can be expressed as exact replacements in existing files.
