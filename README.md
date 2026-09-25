@@ -38,6 +38,18 @@ python -m pip install -r requirements.txt
 
 Ark runs task tests with the same Python environment. Install any task-specific dependencies in this virtual environment as well.
 
+### Included test workspaces
+
+The repository includes a `test_workspace/` directory with small, ready-to-run examples covering bug fixes, feature implementation, and refactoring. Each subdirectory is an independent task with its own prompt, source code, and tests.
+
+For example:
+
+```bash
+python run_ark.py ./test_workspace/bugfix_001_date_range
+```
+
+Ark copies the selected example to `ark-workspace`, so the original files under `test_workspace/` remain unchanged and can be reused in later runs.
+
 ### OpenAI
 
 The default configuration in `config/config.json` uses the OpenAI API. Export your key and pass a task workspace to Ark:
