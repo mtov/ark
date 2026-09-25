@@ -52,6 +52,7 @@ def test_run_tool_skips_file_read_already_in_recent_context(tmp_path: Path) -> N
         "Use the existing observation instead of reading the file again."
     )
     assert result.note == "skipped: already in context"
+    assert result.skipped is True
 
 
 def test_run_tests_records_test_result(monkeypatch, tmp_path: Path) -> None:

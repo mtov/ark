@@ -24,6 +24,7 @@ TEST_TIMEOUT_SECONDS = 30
 class ToolResult:
     output: str
     note: str | None = None
+    skipped: bool = False
 
 
 def _resolve_workspace_target(action_input: str, workspace_path: Path) -> Path | str:
@@ -239,6 +240,7 @@ def run_tool(
                 "This read_file result is already available in the recent context. "
                 "Use the existing observation instead of reading the file again.",
                 note="skipped: already in context",
+                skipped=True,
             )
         return ToolResult(read_file(tool_call.args, workspace_path))
     if tool_call.name == "find_text":

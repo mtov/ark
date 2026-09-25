@@ -107,6 +107,22 @@ def test_memory_forgets_file_read_outside_recent_context() -> None:
     assert history.has_current_file_read("src/example.py") is False
 
 
+def test_skipped_reads_do_not_keep_file_contents_in_recent_context() -> None:
+    history = Memory()
+    read_call = ToolCall("inspect", "read_file", "src/example.py")
+    history.append(1, read_call, "contents")
+
+    for iteration in range(2, MAX_HISTORY_ENTRIES + 2):
+        history.append(
+            iteration,
+            read_call,
+            "Already available in recent context.",
+            skipped=True,
+        )
+
+    assert history.has_current_file_read("src/example.py") is False
+
+
 def test_successful_edit_invalidates_recent_file_read() -> None:
     history = Memory()
     history.append(1, ToolCall("inspect", "read_file", "src/example.py"), "old")

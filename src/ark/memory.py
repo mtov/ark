@@ -13,6 +13,7 @@ class MemoryEntry:
     iteration: int
     tool_call: ToolCall
     result: str
+    skipped: bool = False
 
 
 @dataclass
@@ -20,8 +21,15 @@ class Memory:
     entries: list[MemoryEntry] = field(default_factory=list)
     tools_called: list[str] = field(default_factory=list)
 
-    def append(self, iteration: int, tool_call: ToolCall, result: str) -> None:
-        self.entries.append(MemoryEntry(iteration, tool_call, result))
+    def append(
+        self,
+        iteration: int,
+        tool_call: ToolCall,
+        result: str,
+        *,
+        skipped: bool = False,
+    ) -> None:
+        self.entries.append(MemoryEntry(iteration, tool_call, result, skipped))
 
     def record_tool_call(self, name: str) -> None:
         self.tools_called.append(name)
@@ -41,7 +49,8 @@ class Memory:
 
         for entry in reversed(self.entries[-MAX_HISTORY_ENTRIES:]):
             if (
-                entry.tool_call.name == "read_file"
+                not entry.skipped
+                and entry.tool_call.name == "read_file"
                 and entry.tool_call.args.strip() == normalized_path
             ):
                 return True

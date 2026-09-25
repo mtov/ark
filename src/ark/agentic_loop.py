@@ -149,7 +149,12 @@ def agentic_loop(config: AgentConfig) -> LoopResult:
 
             tool_result = run_tool(tool_call, config, memory)
             print_tool_call(iteration, tool_call, tool_result.note)
-            memory.append(iteration, tool_call, tool_result.output)
+            memory.append(
+                iteration,
+                tool_call,
+                tool_result.output,
+                skipped=tool_result.skipped,
+            )
 
         rollback_workspace_changes(config, MAX_ITERATIONS_REACHED_MESSAGE)
         return LoopResult.max_iterations_reached(memory)
