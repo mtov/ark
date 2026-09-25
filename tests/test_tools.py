@@ -4,7 +4,9 @@ from pathlib import Path
 
 from ark import tools
 from ark.inputs import AgentConfig
+from ark.memory import Memory
 from ark.models import ModelConfig
+from ark.protocol import ToolCall
 
 
 def build_context(tmp_path: Path) -> AgentConfig:
@@ -33,6 +35,23 @@ def test_read_file_returns_file_contents(tmp_path: Path) -> None:
     content = tools.read_file("example.txt", tmp_path)
 
     assert content == "hello"
+
+
+def test_run_tool_skips_file_read_already_in_recent_context(tmp_path: Path) -> None:
+    memory = Memory()
+    memory.append(1, ToolCall("inspect", "read_file", "example.txt"), "hello")
+
+    result = tools.run_tool(
+        ToolCall("inspect again", "read_file", "example.txt"),
+        build_context(tmp_path),
+        memory,
+    )
+
+    assert result.output == (
+        "This read_file result is already available in the recent context. "
+        "Use the existing observation instead of reading the file again."
+    )
+    assert result.note == "skipped: already in context"
 
 
 def test_run_tests_records_test_result(monkeypatch, tmp_path: Path) -> None:

@@ -147,7 +147,7 @@ def agentic_loop(config: AgentConfig) -> LoopResult:
                 commit_workspace_changes(config)
                 return LoopResult.success(finish_output, memory)
 
-            tool_result = run_tool(tool_call, config)
+            tool_result = run_tool(tool_call, config, memory)
             print_tool_call(iteration, tool_call, tool_result.note)
             memory.append(iteration, tool_call, tool_result.output)
 

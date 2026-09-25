@@ -89,3 +89,35 @@ def test_memory_records_tool_calls_in_order() -> None:
     history.record_tool_call("run_tests")
 
     assert history.tools_called == ["read_file", "finish", "run_tests"]
+
+
+def test_memory_finds_file_read_in_recent_context() -> None:
+    history = Memory()
+    history.append(1, ToolCall("inspect", "read_file", "src/example.py"), "contents")
+
+    assert history.has_current_file_read("src/example.py") is True
+
+
+def test_memory_forgets_file_read_outside_recent_context() -> None:
+    history = Memory()
+    history.append(1, ToolCall("inspect", "read_file", "src/example.py"), "contents")
+    for iteration in range(2, MAX_HISTORY_ENTRIES + 2):
+        history.append(iteration, ToolCall("list", "list_files", "."), "files")
+
+    assert history.has_current_file_read("src/example.py") is False
+
+
+def test_successful_edit_invalidates_recent_file_read() -> None:
+    history = Memory()
+    history.append(1, ToolCall("inspect", "read_file", "src/example.py"), "old")
+    history.append(
+        2,
+        ToolCall(
+            "edit",
+            "edit_file",
+            "path: src/example.py\nold:\n```\nold\n```\nnew:\n```\nnew\n```",
+        ),
+        "Edit applied successfully to src/example.py.",
+    )
+
+    assert history.has_current_file_read("src/example.py") is False

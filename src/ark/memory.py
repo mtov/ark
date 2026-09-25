@@ -36,6 +36,25 @@ class Memory:
             for entry in self.entries
         )
 
+    def has_current_file_read(self, path: str) -> bool:
+        normalized_path = path.strip()
+
+        for entry in reversed(self.entries[-MAX_HISTORY_ENTRIES:]):
+            if (
+                entry.tool_call.name == "read_file"
+                and entry.tool_call.args.strip() == normalized_path
+            ):
+                return True
+
+            if (
+                entry.tool_call.name == "edit_file"
+                and entry.result.startswith("Edit applied successfully to ")
+                and self._edit_path(entry.tool_call) == normalized_path
+            ):
+                return False
+
+        return False
+
     def unique_args_for(self, name: str) -> list[str]:
         seen: set[str] = set()
         items: list[str] = []
@@ -52,13 +71,21 @@ class Memory:
         return items
 
     @staticmethod
-    def _context_args(tool_call: ToolCall) -> str:
+    def _edit_path(tool_call: ToolCall) -> str | None:
+        for line in tool_call.args.splitlines():
+            if line.startswith("path:"):
+                return line.removeprefix("path:").strip()
+
+        return None
+
+    @classmethod
+    def _context_args(cls, tool_call: ToolCall) -> str:
         if tool_call.name != "edit_file":
             return tool_call.args
 
-        for line in tool_call.args.splitlines():
-            if line.startswith("path:"):
-                return line
+        edit_path = cls._edit_path(tool_call)
+        if edit_path is not None:
+            return f"path: {edit_path}"
 
         return "<edit content omitted>"
 

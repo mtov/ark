@@ -9,6 +9,7 @@ from pathlib import Path
 
 from .guards import resolve_tool_path
 from .inputs import AgentConfig, create_workspace_snapshot
+from .memory import Memory
 from .protocol import ToolCall, parse_edit_file_request
 from .traces import trace_edit_event, trace_test_event
 
@@ -226,12 +227,19 @@ def edit_file(action_input: str, config: AgentConfig) -> str:
 def run_tool(
     tool_call: ToolCall,
     config: AgentConfig,
+    memory: Memory,
 ) -> ToolResult:
     workspace_path = config.workspace_path
 
     if tool_call.name == "list_files":
         return ToolResult(list_files(tool_call.args, workspace_path))
     if tool_call.name == "read_file":
+        if memory.has_current_file_read(tool_call.args):
+            return ToolResult(
+                "This read_file result is already available in the recent context. "
+                "Use the existing observation instead of reading the file again.",
+                note="skipped: already in context",
+            )
         return ToolResult(read_file(tool_call.args, workspace_path))
     if tool_call.name == "find_text":
         return ToolResult(find_text(tool_call.args, workspace_path))
