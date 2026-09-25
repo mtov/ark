@@ -36,11 +36,6 @@ class Memory:
             for entry in self.entries
         )
 
-    def last_tool_call(self) -> ToolCall | None:
-        if not self.entries:
-            return None
-        return self.entries[-1].tool_call
-
     def unique_args_for(self, name: str) -> list[str]:
         seen: set[str] = set()
         items: list[str] = []

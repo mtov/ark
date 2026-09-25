@@ -17,11 +17,6 @@ MAX_FIND_TEXT_MATCHES = 20
 SKIPPED_DIRECTORIES = {".git", ".venv", "__pycache__"}
 TEST_COMMAND = (sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider")
 TEST_TIMEOUT_SECONDS = 30
-REDUNDANT_READ_FILE_MESSAGE = (
-    "Redundant tool request skipped: your previous read_file call already read this same file. "
-    "Do not request the same file again unless it changed or you need to verify a specific detail "
-    "before finishing. Continue with a different action."
-)
 
 
 @dataclass
@@ -228,32 +223,11 @@ def edit_file(action_input: str, config: AgentConfig) -> str:
     return f"Edit applied successfully to {edit.path}."
 
 
-def should_skip_redundant_tool_call(
-    tool_call: ToolCall,
-    previous_call: ToolCall | None = None,
-) -> str | None:
-    if previous_call is None:
-        return None
-
-    if (
-        tool_call.name == "read_file"
-        and previous_call.name == "read_file"
-        and tool_call.args.strip() == previous_call.args.strip()
-    ):
-        return REDUNDANT_READ_FILE_MESSAGE
-
-    return None
-
-
 def run_tool(
     tool_call: ToolCall,
     config: AgentConfig,
-    previous_call: ToolCall | None = None,
 ) -> ToolResult:
     workspace_path = config.workspace_path
-    skipped_reason = should_skip_redundant_tool_call(tool_call, previous_call)
-    if skipped_reason is not None:
-        return ToolResult(skipped_reason, note="skipped: redundant")
 
     if tool_call.name == "list_files":
         return ToolResult(list_files(tool_call.args, workspace_path))

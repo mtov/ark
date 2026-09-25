@@ -19,7 +19,6 @@ from .inputs import (
 from .memory import Memory
 from .models import call_model_api
 from .protocol import ToolCall, parse_response, repair_response
-from .test_failures import summarize_test_failure_output
 from .tools import run_tool
 from .traces import (
     trace_action,
@@ -122,7 +121,7 @@ def handle_finish(
         memory.append(
             iteration,
             tool_call,
-            summarize_test_failure_output(finish_result.test_output or ""),
+            finish_result.test_output or "Tests failed without output.",
         )
         return None
 
@@ -148,7 +147,7 @@ def agentic_loop(config: AgentConfig) -> LoopResult:
                 commit_workspace_changes(config)
                 return LoopResult.success(finish_output, memory)
 
-            tool_result = run_tool(tool_call, config, memory.last_tool_call())
+            tool_result = run_tool(tool_call, config)
             print_tool_call(iteration, tool_call, tool_result.note)
             memory.append(iteration, tool_call, tool_result.output)
 

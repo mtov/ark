@@ -116,7 +116,7 @@ def test_finish_retries_after_failed_tests_without_resetting_workspace(monkeypat
     assert result.status == "success"
     assert result.output == FINISH_SUCCESS_MESSAGE
     assert result.tools_called == ["finish", "run_tests", "finish", "run_tests"]
-    assert "approved edits remain in the workspace" in seen_histories[1]
+    assert "1 failed" in seen_histories[1]
 
 
 def test_finish_requires_an_approved_edit(monkeypatch, tmp_path: Path) -> None:
@@ -204,22 +204,3 @@ def test_agentic_loop_returns_failure_with_tool_history(monkeypatch, tmp_path: P
     assert result.error == "missing content"
     assert result.error_type == "ValueError"
     assert result.tools_called == []
-
-
-def test_redundant_consecutive_read_is_still_skipped(monkeypatch, tmp_path: Path) -> None:
-    context = build_context(tmp_path)
-    responses = iter([
-        ToolCall("read", "read_file", "example.py"),
-        ToolCall("read again", "read_file", "example.py"),
-        ToolCall("done", "finish", ""),
-    ])
-    monkeypatch.setattr(
-        "ark.agentic_loop.invoke_model",
-        tool_call_sequence(*responses),
-    )
-    monkeypatch.setattr("ark.agentic_loop.apply_finish", lambda *_args: ApplyFinishResult("completed"))
-    monkeypatch.setattr(Memory, "has_successful_edit", lambda _memory: True)
-
-    result = agentic_loop(context)
-
-    assert result.status == "success"

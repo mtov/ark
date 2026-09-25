@@ -167,7 +167,7 @@ The available actions are:
 | `edit_file` | `path`, `old`, and `new` blocks | Propose one exact replacement. |
 | `finish` | Blank | Request final validation. |
 
-All tool paths are restricted to `ark-workspace`. Ark also skips an identical consecutive `read_file` call to avoid wasting an iteration.
+All tool paths are restricted to `ark-workspace`.
 
 ## Edits and approval
 
