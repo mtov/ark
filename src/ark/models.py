@@ -3,20 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import os
-from urllib import error, request
 
 from .traces import record_response_usage
 
 
 @dataclass
 class ModelConfig:
-    model: str
     timeout_seconds: int
     openai_base_url: str | None
     openai_model: str | None
     openai_api_key_env: str | None
-    ollama_base_url: str | None = None
-    ollama_model: str | None = None
 
 
 @dataclass
@@ -151,44 +147,6 @@ def resolve_openai_api_key(config: ModelConfig) -> str:
     return os.environ.get("OPENAI_API_KEY", "ark")
 
 
-def resolve_ollama_base_url(config: ModelConfig) -> str:
-    return config.ollama_base_url or "http://localhost:11434"
-
-
-def extract_ollama_content(response: object) -> str:
-    if not isinstance(response, dict):
-        raise ValueError("Ollama returned a non-JSON response.")
-
-    content = response.get("response")
-    if isinstance(content, str) and content.strip():
-        return content.strip()
-
-    message = response.get("message")
-    if isinstance(message, dict):
-        message_content = message.get("content")
-        if isinstance(message_content, str) and message_content.strip():
-            return message_content.strip()
-
-    raise ValueError("Ollama returned a response without message content.")
-
-
-def extract_ollama_usage(response: object) -> TokenUsage:
-    if not isinstance(response, dict):
-        return TokenUsage()
-
-    input_tokens = response.get("prompt_eval_count")
-    output_tokens = response.get("eval_count")
-    total_tokens = None
-    if input_tokens is not None or output_tokens is not None:
-        total_tokens = (input_tokens or 0) + (output_tokens or 0)
-
-    return TokenUsage(
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        total_tokens=total_tokens,
-    )
-
-
 class Model:
     def __init__(self, config: ModelConfig, system_prompt: str) -> None:
         self.config = config
@@ -196,35 +154,6 @@ class Model:
         self._openai_client: object | None = None
 
     def call(self, user_prompt: str) -> ModelResponse:
-        if self.config.model == "openai-compatible":
-            response = self._call_openai_compatible(user_prompt)
-        elif self.config.model == "ollama":
-            response = self._call_ollama(user_prompt)
-        else:
-            raise ValueError(f"Unsupported model: {self.config.model}")
-
-        record_response_usage(response.token_usage)
-        return response
-
-    def _get_openai_client(self) -> object:
-        if self._openai_client is not None:
-            return self._openai_client
-
-        try:
-            from openai import OpenAI
-        except ImportError as exc:
-            raise RuntimeError(
-                "OpenAI Python package not installed. Run pip install -r requirements.txt."
-            ) from exc
-
-        self._openai_client = OpenAI(
-            api_key=resolve_openai_api_key(self.config),
-            base_url=self.config.openai_base_url,
-            timeout=self.config.timeout_seconds,
-        )
-        return self._openai_client
-
-    def _call_openai_compatible(self, user_prompt: str) -> ModelResponse:
         openai_model = require_config_value(
             self.config.openai_model,
             "openai_model",
@@ -257,61 +186,26 @@ class Model:
                     continue
                 raise
 
-            return build_model_response(content, usage)
+            model_response = build_model_response(content, usage)
+            record_response_usage(model_response.token_usage)
+            return model_response
 
         raise RuntimeError("Model retry loop ended unexpectedly.")
 
-    def _call_ollama(self, user_prompt: str) -> ModelResponse:
-        ollama_model = require_config_value(
-            self.config.ollama_model,
-            "ollama_model",
-            "Ollama",
-        )
-        base_url = resolve_ollama_base_url(self.config).rstrip("/")
-        payload = json.dumps(
-            {
-                "model": ollama_model,
-                "system": self.system_prompt,
-                "prompt": user_prompt,
-                "stream": False,
-            }
-        ).encode("utf-8")
-        req = request.Request(
-            f"{base_url}/api/generate",
-            data=payload,
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
+    def _get_openai_client(self) -> object:
+        if self._openai_client is not None:
+            return self._openai_client
 
         try:
-            with request.urlopen(req, timeout=self.config.timeout_seconds) as response:
-                body = response.read().decode("utf-8")
-        except error.HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace").strip()
+            from openai import OpenAI
+        except ImportError as exc:
             raise RuntimeError(
-                f"Ollama request failed for {base_url}: "
-                f"HTTP {exc.code}: {detail or exc.reason}"
-            ) from exc
-        except error.URLError as exc:
-            raise RuntimeError(
-                f"Ollama request failed for {base_url}: "
-                f"{exc.__class__.__name__}: {exc.reason}"
-            ) from exc
-        except TimeoutError as exc:
-            raise RuntimeError(
-                f"Ollama request timed out after {self.config.timeout_seconds} seconds."
-            ) from exc
-        except Exception as exc:  # noqa: BLE001
-            raise RuntimeError(
-                f"Ollama request failed for {base_url}: {exc.__class__.__name__}: {exc}"
+                "OpenAI Python package not installed. Run pip install -r requirements.txt."
             ) from exc
 
-        try:
-            parsed = json.loads(body)
-        except json.JSONDecodeError as exc:
-            raise RuntimeError(f"Ollama returned invalid JSON: {exc}") from exc
-
-        return build_model_response(
-            extract_ollama_content(parsed),
-            extract_ollama_usage(parsed),
+        self._openai_client = OpenAI(
+            api_key=resolve_openai_api_key(self.config),
+            base_url=self.config.openai_base_url,
+            timeout=self.config.timeout_seconds,
         )
+        return self._openai_client

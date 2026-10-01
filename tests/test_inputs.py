@@ -68,14 +68,14 @@ def test_build_system_prompt_appends_workspace_root(tmp_path: Path) -> None:
     assert result == f"Base system prompt.\n\nWorkspace root:\n{tmp_path}"
 
 
-def test_load_model_config_supports_ollama(tmp_path: Path, monkeypatch) -> None:
+def test_load_model_config_supports_openai(tmp_path: Path, monkeypatch) -> None:
     config_path = tmp_path / "config.json"
     config_path.write_text(
         json.dumps(
             {
-                "model": "ollama",
-                "ollama_base_url": "http://localhost:11434",
-                "ollama_model": "qwen2.5-coder:14b",
+                "openai_base_url": "http://localhost:8000/v1",
+                "openai_model": "local-model",
+                "openai_api_key_env": "OPENAI_API_KEY",
                 "timeout_seconds": 45,
             }
         ),
@@ -86,9 +86,9 @@ def test_load_model_config_supports_ollama(tmp_path: Path, monkeypatch) -> None:
 
     model_config = inputs.load_model_config()
 
-    assert model_config.model == "ollama"
-    assert model_config.ollama_base_url == "http://localhost:11434"
-    assert model_config.ollama_model == "qwen2.5-coder:14b"
+    assert model_config.openai_base_url == "http://localhost:8000/v1"
+    assert model_config.openai_model == "local-model"
+    assert model_config.openai_api_key_env == "OPENAI_API_KEY"
     assert model_config.timeout_seconds == 45
 
 
@@ -117,7 +117,6 @@ def test_prepare_run_keeps_agents_md_out_of_system_prompt(tmp_path: Path, monkey
     config_path.write_text(
         json.dumps(
             {
-                "model": "openai-compatible",
                 "openai_base_url": None,
                 "openai_model": "gpt-5.4-mini",
                 "timeout_seconds": 30,

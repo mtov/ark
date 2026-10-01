@@ -10,7 +10,7 @@ from ark.protocol import ToolCall
 
 def build_context(tmp_path: Path) -> AgentConfig:
     return AgentConfig(
-        model_config=ModelConfig("openai-compatible", 30, None, "model", "OPENAI_API_KEY"),
+        model_config=ModelConfig(30, None, "model", "OPENAI_API_KEY"),
         system_prompt="system",
         user_prompt="prompt",
         source_workspace_path=tmp_path,

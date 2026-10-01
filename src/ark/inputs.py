@@ -71,18 +71,11 @@ def load_model_config() -> ModelConfig:
     except OSError as exc:
         raise OSError(f"Could not read config file: {CONFIG_PATH}") from exc
 
-    selected_model = raw_config.get("model")
-    if selected_model is None:
-        raise KeyError("Config file must define 'model'.")
-
     return ModelConfig(
-        model=selected_model,
         timeout_seconds=raw_config["timeout_seconds"],
         openai_base_url=raw_config.get("openai_base_url"),
         openai_model=raw_config.get("openai_model"),
         openai_api_key_env=raw_config.get("openai_api_key_env"),
-        ollama_base_url=raw_config.get("ollama_base_url"),
-        ollama_model=raw_config.get("ollama_model"),
     )
 
 
@@ -191,8 +184,7 @@ def build_user_prompt(user_prompt: str, workspace_instructions: str | None = Non
 
 
 def print_model_summary(model_config: ModelConfig) -> None:
-    model_name = model_config.openai_model or model_config.ollama_model or model_config.model
-    print(f"Using model: {model_config.model} ({model_name})")
+    print(f"Using OpenAI model: {model_config.openai_model}")
 
 
 def print_user_prompt(user_prompt: str) -> None:

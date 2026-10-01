@@ -23,7 +23,7 @@ Ark is intended for research, teaching, and small curated benchmarks. It is not 
 ### Requirements
 
 - Python 3.11 or newer.
-- An OpenAI API key, an OpenAI-compatible endpoint, or a local Ollama server.
+- An OpenAI API key or an OpenAI-compatible endpoint.
 - A task workspace containing a `prompt.txt` file, source code, and Pytest tests.
 
 ### Installation
@@ -60,25 +60,6 @@ python run_ark.py ./test_workspace/bugfix_001_date_range
 ```
 
 To use another OpenAI-compatible service, set `openai_base_url`, `openai_model`, and, when necessary, `openai_api_key_env` in `config/config.json`.
-
-### Ollama
-
-To run with Ollama, start the Ollama server, make sure the selected model is available, and update `config/config.json`:
-
-```json
-{
-  "model": "ollama",
-  "ollama_base_url": "http://localhost:11434",
-  "ollama_model": "qwen2.5-coder:14b",
-  "timeout_seconds": 600
-}
-```
-
-Then run the same command:
-
-```bash
-python run_ark.py ./test_workspace/bugfix_001_date_range
-```
 
 ### During a run
 
@@ -137,7 +118,7 @@ The main modules are deliberately small and have distinct responsibilities:
 
 - `inputs.py` loads configuration and prompts, prepares `ark-workspace`, and manages workspace snapshots.
 - `agentic_loop.py` coordinates model calls, tool execution, completion, and rollback.
-- `models.py` provides the OpenAI-compatible and Ollama integrations.
+- `models.py` provides the OpenAI integration.
 - `protocol.py` parses and validates the model's requested action.
 - `tools.py` implements workspace inspection, test execution, and approved edits.
 - `memory.py` builds the compact history sent with the next model request.
