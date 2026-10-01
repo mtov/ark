@@ -9,7 +9,7 @@ from ark.agentic_loop import (
     MAX_ITERATIONS_REACHED_MESSAGE,
     Memory,
     agentic_loop,
-    handle_finish,
+    process_finish,
     invoke_model,
 )
 from ark.finish_handler import ApplyFinishResult
@@ -128,9 +128,9 @@ def test_finish_requires_an_approved_edit(monkeypatch, tmp_path: Path) -> None:
         lambda _config, tool_call: apply_calls.append(tool_call),
     )
 
-    result = handle_finish(build_context(tmp_path), memory, 1, finish_call)
+    result = process_finish(build_context(tmp_path), memory, 1, finish_call)
 
-    assert result is None
+    assert result is False
     assert apply_calls == []
     assert memory.entries[-1].result == FINISH_WITHOUT_EDIT_MESSAGE
 

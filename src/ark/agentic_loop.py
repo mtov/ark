@@ -8,7 +8,7 @@ from .cli_output import (
     print_tool_call,
     print_success_summary,
 )
-from .finish_handler import apply_finish
+from .finish_handler import INVALID_FINISH_MESSAGE, apply_finish
 from .inputs import (
     AgentConfig,
     commit_workspace_changes,
@@ -93,17 +93,17 @@ def invoke_model(config: AgentConfig, memory: Memory) -> ToolCall:
     return tool_call
 
 
-def handle_finish(
+def process_finish(
     config: AgentConfig,
     memory: Memory,
     iteration: int,
     tool_call: ToolCall,
-) -> str | None:
+) -> bool:
     if not memory.has_successful_edit():
         print_tool_call(iteration, tool_call)
         trace_finish_event("failed", "finish_validation", FINISH_WITHOUT_EDIT_MESSAGE)
         memory.append(iteration, tool_call, FINISH_WITHOUT_EDIT_MESSAGE)
-        return None
+        return False
 
     finish_result = apply_finish(config, tool_call)
     print_tool_call(iteration, tool_call)
@@ -112,9 +112,9 @@ def handle_finish(
         memory.append(
             iteration,
             tool_call,
-            "Finish action must have an empty Action Input.",
+            INVALID_FINISH_MESSAGE,
         )
-        return None
+        return False
 
     memory.record_tool_call("run_tests")
     if finish_result.status == "post_apply_tests_failed":
@@ -123,9 +123,9 @@ def handle_finish(
             tool_call,
             finish_result.test_output or "Tests failed without output.",
         )
-        return None
+        return False
 
-    return FINISH_SUCCESS_MESSAGE
+    return True
 
 
 def agentic_loop(config: AgentConfig) -> LoopResult:
@@ -135,17 +135,17 @@ def agentic_loop(config: AgentConfig) -> LoopResult:
             tool_call = invoke_model(config, memory)
 
             if tool_call.name == "finish":
-                finish_output = handle_finish(
+                finish_succeeded = process_finish(
                     config,
                     memory,
                     iteration,
                     tool_call,
                 )
-                if finish_output is None:
+                if not finish_succeeded:
                     continue
 
                 commit_workspace_changes(config)
-                return LoopResult.success(finish_output, memory)
+                return LoopResult.success(FINISH_SUCCESS_MESSAGE, memory)
 
             tool_result = run_tool(tool_call, config, memory)
             print_tool_call(iteration, tool_call, tool_result.note)
