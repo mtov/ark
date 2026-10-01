@@ -4,10 +4,10 @@ import argparse
 import json
 import shutil
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 
-from .models import Model, ModelConfig
+from .models import Model
 from .traces import clear_trace, trace_request, trace_workspace_event
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -22,16 +22,11 @@ IGNORED_WORKSPACE_NAMES = ("evaluation",)
 
 @dataclass
 class AgentConfig:
-    model_config: ModelConfig
-    system_prompt: str
+    model: Model
     user_prompt: str
     source_workspace_path: Path
     workspace_path: Path
     snapshot_path: Path | None = None
-    model: Model = field(init=False, repr=False, compare=False)
-
-    def __post_init__(self) -> None:
-        self.model = Model(self.model_config, self.system_prompt)
 
 
 def _read_text_file(
@@ -60,7 +55,7 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def load_model_config() -> ModelConfig:
+def load_model(system_prompt: str) -> Model:
     try:
         with CONFIG_PATH.open("r", encoding="utf-8") as file:
             raw_config = json.load(file)
@@ -71,11 +66,12 @@ def load_model_config() -> ModelConfig:
     except OSError as exc:
         raise OSError(f"Could not read config file: {CONFIG_PATH}") from exc
 
-    return ModelConfig(
+    return Model(
+        name=raw_config["openai_model"],
+        system_prompt=system_prompt,
         timeout_seconds=raw_config["timeout_seconds"],
-        openai_base_url=raw_config.get("openai_base_url"),
-        openai_model=raw_config["openai_model"],
-        openai_api_key_env=raw_config.get("openai_api_key_env"),
+        base_url=raw_config.get("openai_base_url"),
+        api_key_env=raw_config.get("openai_api_key_env"),
     )
 
 
@@ -183,8 +179,8 @@ def build_user_prompt(user_prompt: str, workspace_instructions: str | None = Non
     )
 
 
-def print_model_summary(model_config: ModelConfig) -> None:
-    print(f"Using OpenAI model: {model_config.openai_model}")
+def print_model_summary(model: Model) -> None:
+    print(f"Using OpenAI model: {model.name}")
 
 
 def print_user_prompt(user_prompt: str) -> None:
@@ -196,9 +192,9 @@ def prepare_run(workspace_path_arg: str) -> AgentConfig:
     clear_trace()
     source_workspace_path = resolve_workspace_path(workspace_path_arg)
     workspace_path = prepare_runtime_workspace(source_workspace_path)
-    model_config = load_model_config()
-    print_model_summary(model_config)
     system_prompt = build_system_prompt(load_system_prompt(), workspace_path)
+    model = load_model(system_prompt)
+    print_model_summary(model)
     workspace_instructions = load_workspace_instructions(workspace_path)
     if workspace_instructions is not None:
         print("Loading AGENTS.md")
@@ -209,8 +205,7 @@ def prepare_run(workspace_path_arg: str) -> AgentConfig:
     print_user_prompt(user_prompt)
     trace_request(user_prompt)
     return AgentConfig(
-        model_config=model_config,
-        system_prompt=system_prompt,
+        model=model,
         user_prompt=user_prompt,
         source_workspace_path=source_workspace_path,
         workspace_path=workspace_path,

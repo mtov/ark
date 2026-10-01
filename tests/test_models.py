@@ -9,7 +9,6 @@ from ark.inputs import AgentConfig
 from ark.models import (
     EmptyModelResponseError,
     Model,
-    ModelConfig,
     extract_openai_content,
     extract_openai_usage,
 )
@@ -17,13 +16,12 @@ from ark.models import (
 
 def build_openai_context() -> AgentConfig:
     return AgentConfig(
-        model_config=ModelConfig(
+        model=Model(
+            name="local-model",
+            system_prompt="system prompt",
             timeout_seconds=30,
-            openai_base_url="http://localhost:8000/v1",
-            openai_model="local-model",
-            openai_api_key_env=None,
+            base_url="http://localhost:8000/v1",
         ),
-        system_prompt="system prompt",
         user_prompt="user prompt",
         source_workspace_path=SimpleNamespace(),
         workspace_path=SimpleNamespace(),
@@ -55,7 +53,7 @@ def test_model_reuses_openai_client(monkeypatch) -> None:
         {"choices": [{"message": {"content": "second"}}]},
     ]
     seen = install_fake_openai(monkeypatch, responses)
-    model = Model(build_openai_context().model_config, "system prompt")
+    model = build_openai_context().model
 
     first_response = model.call("first prompt")
     second_response = model.call("second prompt")
@@ -208,13 +206,12 @@ def test_model_does_not_retry_openai_refusal(monkeypatch) -> None:
 
 def test_model_uses_openai_client_timeout(monkeypatch) -> None:
     config = AgentConfig(
-        model_config=ModelConfig(
+        model=Model(
+            name="local-model",
+            system_prompt="system prompt",
             timeout_seconds=30,
-            openai_base_url="http://localhost:8000/v1",
-            openai_model="local-model",
-            openai_api_key_env=None,
+            base_url="http://localhost:8000/v1",
         ),
-        system_prompt="system prompt",
         user_prompt="user prompt",
         source_workspace_path=SimpleNamespace(),
         workspace_path=SimpleNamespace(),

@@ -68,7 +68,7 @@ def test_build_system_prompt_appends_workspace_root(tmp_path: Path) -> None:
     assert result == f"Base system prompt.\n\nWorkspace root:\n{tmp_path}"
 
 
-def test_load_model_config_supports_openai(tmp_path: Path, monkeypatch) -> None:
+def test_load_model_supports_openai(tmp_path: Path, monkeypatch) -> None:
     config_path = tmp_path / "config.json"
     config_path.write_text(
         json.dumps(
@@ -84,21 +84,22 @@ def test_load_model_config_supports_openai(tmp_path: Path, monkeypatch) -> None:
 
     monkeypatch.setattr(inputs, "CONFIG_PATH", config_path)
 
-    model_config = inputs.load_model_config()
+    model = inputs.load_model("system prompt")
 
-    assert model_config.openai_base_url == "http://localhost:8000/v1"
-    assert model_config.openai_model == "local-model"
-    assert model_config.openai_api_key_env == "OPENAI_API_KEY"
-    assert model_config.timeout_seconds == 45
+    assert model.name == "local-model"
+    assert model.system_prompt == "system prompt"
+    assert model.base_url == "http://localhost:8000/v1"
+    assert model.api_key_env == "OPENAI_API_KEY"
+    assert model.timeout_seconds == 45
 
 
-def test_load_model_config_reports_invalid_json(tmp_path: Path, monkeypatch) -> None:
+def test_load_model_reports_invalid_json(tmp_path: Path, monkeypatch) -> None:
     config_path = tmp_path / "config.json"
     config_path.write_text("{invalid", encoding="utf-8")
     monkeypatch.setattr(inputs, "CONFIG_PATH", config_path)
 
     with pytest.raises(ValueError, match="contains invalid JSON"):
-        inputs.load_model_config()
+        inputs.load_model("system prompt")
 
 
 def test_prepare_run_keeps_agents_md_out_of_system_prompt(tmp_path: Path, monkeypatch) -> None:
@@ -138,7 +139,7 @@ def test_prepare_run_keeps_agents_md_out_of_system_prompt(tmp_path: Path, monkey
 
     config = inputs.prepare_run(str(source_workspace))
 
-    assert config.system_prompt == (
+    assert config.model.system_prompt == (
         "Base system prompt.\n\n"
         "Workspace root:\n"
         f"{runtime_workspace}"

@@ -14,15 +14,19 @@ from ark.agentic_loop import (
 )
 from ark.finish_handler import ApplyFinishResult
 from ark.inputs import AgentConfig
-from ark.models import ModelConfig, build_model_response
+from ark.models import Model, build_model_response
 from ark.protocol import ToolCall
 from ark.tools import ToolResult
 
 
 def build_context(tmp_path: Path) -> AgentConfig:
     return AgentConfig(
-        model_config=ModelConfig(30, None, "model", "OPENAI_API_KEY"),
-        system_prompt="system",
+        model=Model(
+            name="model",
+            system_prompt="system",
+            timeout_seconds=30,
+            api_key_env="OPENAI_API_KEY",
+        ),
         user_prompt="prompt",
         source_workspace_path=tmp_path,
         workspace_path=tmp_path,
@@ -53,9 +57,9 @@ def test_invoke_model_records_tool_call(monkeypatch, tmp_path: Path) -> None:
     memory = Memory()
     config = build_context(tmp_path)
     monkeypatch.setattr(
-        config.model,
+        Model,
         "call",
-        lambda *_args: build_model_response(
+        lambda _model, _prompt: build_model_response(
             "Thought: inspect\nAction: read_file\nAction Input: example.py"
         ),
     )
@@ -72,9 +76,9 @@ def test_invoke_model_records_repaired_tool_call(monkeypatch, tmp_path: Path) ->
     config = build_context(tmp_path)
     repaired_call = ToolCall("recover", "list_files", ".")
     monkeypatch.setattr(
-        config.model,
+        Model,
         "call",
-        lambda *_args: build_model_response("Thought: invalid"),
+        lambda _model, _prompt: build_model_response("Thought: invalid"),
     )
     monkeypatch.setattr(
         "ark.agentic_loop.repair_response",

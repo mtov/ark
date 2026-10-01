@@ -4,14 +4,18 @@ from pathlib import Path
 
 from ark.finish_handler import INVALID_FINISH_MESSAGE, apply_finish
 from ark.inputs import AgentConfig
-from ark.models import ModelConfig
+from ark.models import Model
 from ark.protocol import ToolCall
 
 
 def build_context(tmp_path: Path) -> AgentConfig:
     return AgentConfig(
-        model_config=ModelConfig(30, None, "model", "OPENAI_API_KEY"),
-        system_prompt="system",
+        model=Model(
+            name="model",
+            system_prompt="system",
+            timeout_seconds=30,
+            api_key_env="OPENAI_API_KEY",
+        ),
         user_prompt="prompt",
         source_workspace_path=tmp_path,
         workspace_path=tmp_path,
