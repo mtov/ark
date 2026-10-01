@@ -50,16 +50,29 @@ python run_ark.py ./test_workspace/bugfix_001_date_range
 
 Ark copies the selected example to `ark-workspace`, so the original files under `test_workspace/` remain unchanged and can be reused in later runs.
 
-### OpenAI
+### Model configuration
 
-The default configuration in `config/config.json` uses the OpenAI API. Export your key and pass a task workspace to Ark:
+Ark uses the OpenAI Python client. The default `config/config.json` is:
+
+```json
+{
+  "openai_base_url": null,
+  "openai_model": "gpt-5.4-mini",
+  "timeout_seconds": 600,
+  "openai_api_key_env": "OPENAI_API_KEY"
+}
+```
+
+`openai_model` selects the model, `timeout_seconds` limits each request, and `openai_api_key_env` names the environment variable containing the API key. A null `openai_base_url` uses the default OpenAI endpoint.
+
+Export the configured key and pass a task workspace to Ark:
 
 ```bash
 export OPENAI_API_KEY="your_key_here"
 python run_ark.py ./test_workspace/bugfix_001_date_range
 ```
 
-To use another OpenAI-compatible service, set `openai_base_url`, `openai_model`, and, when necessary, `openai_api_key_env` in `config/config.json`.
+To use an OpenAI-compatible endpoint, set `openai_base_url` and choose the corresponding `openai_model`. Ark supports only the OpenAI client protocol; there is no backend selector in the configuration.
 
 ### During a run
 
@@ -118,7 +131,7 @@ The main modules are deliberately small and have distinct responsibilities:
 
 - `inputs.py` loads configuration and prompts, prepares `ark-workspace`, and manages workspace snapshots.
 - `agentic_loop.py` coordinates model calls, tool execution, completion, and rollback.
-- `models.py` provides the OpenAI integration.
+- `models.py` defines `Model`, which owns the model configuration and system prompt, reuses one OpenAI client throughout the run, sends requests, and normalizes responses and token usage.
 - `protocol.py` parses and validates the model's requested action.
 - `tools.py` implements workspace inspection, test execution, and approved edits.
 - `memory.py` builds the compact history sent with the next model request.
