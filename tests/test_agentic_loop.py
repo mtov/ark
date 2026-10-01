@@ -9,7 +9,7 @@ from ark.agentic_loop import (
     MAX_ITERATIONS_REACHED_MESSAGE,
     Memory,
     agentic_loop,
-    process_finish,
+    try_finish,
     invoke_model,
 )
 from ark.finish_handler import ApplyFinishResult
@@ -51,15 +51,17 @@ def test_loop_result_copies_tool_calls_from_memory() -> None:
 
 def test_invoke_model_records_tool_call(monkeypatch, tmp_path: Path) -> None:
     memory = Memory()
+    config = build_context(tmp_path)
     monkeypatch.setattr(
-        "ark.agentic_loop.call_model_api",
+        config.model,
+        "call",
         lambda *_args: build_model_response(
             "Thought: inspect\nAction: read_file\nAction Input: example.py"
         ),
     )
     monkeypatch.setattr("ark.agentic_loop.trace_action", lambda _request: None)
 
-    tool_call = invoke_model(build_context(tmp_path), memory)
+    tool_call = invoke_model(config, memory)
 
     assert tool_call.name == "read_file"
     assert memory.tools_called == ["read_file"]
@@ -67,9 +69,11 @@ def test_invoke_model_records_tool_call(monkeypatch, tmp_path: Path) -> None:
 
 def test_invoke_model_records_repaired_tool_call(monkeypatch, tmp_path: Path) -> None:
     memory = Memory()
+    config = build_context(tmp_path)
     repaired_call = ToolCall("recover", "list_files", ".")
     monkeypatch.setattr(
-        "ark.agentic_loop.call_model_api",
+        config.model,
+        "call",
         lambda *_args: build_model_response("Thought: invalid"),
     )
     monkeypatch.setattr(
@@ -79,7 +83,7 @@ def test_invoke_model_records_repaired_tool_call(monkeypatch, tmp_path: Path) ->
     monkeypatch.setattr("ark.agentic_loop.trace_validation_error", lambda *_args: None)
     monkeypatch.setattr("ark.agentic_loop.trace_action", lambda _request: None)
 
-    tool_call = invoke_model(build_context(tmp_path), memory)
+    tool_call = invoke_model(config, memory)
 
     assert tool_call is repaired_call
     assert memory.tools_called == ["list_files"]
@@ -128,7 +132,7 @@ def test_finish_requires_an_approved_edit(monkeypatch, tmp_path: Path) -> None:
         lambda _config, tool_call: apply_calls.append(tool_call),
     )
 
-    result = process_finish(build_context(tmp_path), memory, 1, finish_call)
+    result = try_finish(build_context(tmp_path), memory, 1, finish_call)
 
     assert result is False
     assert apply_calls == []

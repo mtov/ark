@@ -4,7 +4,6 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from .models import call_model_api
 from .traces import trace_repair_attempt
 
 if TYPE_CHECKING:
@@ -84,5 +83,5 @@ def parse_edit_file_request(text: str) -> EditFileRequest:
 def repair_response(config: AgentConfig, user_message: str, reason: str) -> ToolCall:
     trace_repair_attempt("Protocol repair", reason)
     repair_message = f"{user_message}\n\n{REPAIR_PROMPT}"
-    response = call_model_api(config, repair_message)
+    response = config.model.call(repair_message)
     return parse_response(response.content)

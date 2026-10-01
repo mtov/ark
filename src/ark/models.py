@@ -3,13 +3,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import os
-from typing import TYPE_CHECKING
 from urllib import error, request
 
 from .traces import record_response_usage
-
-if TYPE_CHECKING:
-    from .inputs import AgentConfig
 
 
 @dataclass
@@ -143,8 +139,8 @@ def extract_openai_usage(response: object) -> TokenUsage:
     )
 
 
-def resolve_openai_api_key(config: AgentConfig) -> str:
-    api_key_env = config.model_config.openai_api_key_env
+def resolve_openai_api_key(config: ModelConfig) -> str:
+    api_key_env = config.openai_api_key_env
     if api_key_env:
         return require_config_value(
             os.environ.get(api_key_env),
@@ -155,54 +151,8 @@ def resolve_openai_api_key(config: AgentConfig) -> str:
     return os.environ.get("OPENAI_API_KEY", "ark")
 
 
-def resolve_ollama_base_url(config: AgentConfig) -> str:
-    return config.model_config.ollama_base_url or "http://localhost:11434"
-
-
-def call_openai_compatible(config: AgentConfig, user_prompt: str) -> ModelResponse:
-    try:
-        from openai import OpenAI
-    except ImportError as exc:
-        raise RuntimeError("OpenAI Python package not installed. Run pip install -r requirements.txt.") from exc
-
-    openai_model = require_config_value(
-        config.model_config.openai_model,
-        "openai_model",
-        "OpenAI-compatible",
-    )
-    client = OpenAI(
-        api_key=resolve_openai_api_key(config),
-        base_url=config.model_config.openai_base_url,
-        timeout=config.model_config.timeout_seconds,
-    )
-
-    for attempt in range(MAX_EMPTY_RESPONSE_RETRIES + 1):
-        try:
-            response = client.chat.completions.create(
-                model=openai_model,
-                messages=[
-                    {"role": "system", "content": config.system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
-            )
-        except Exception as exc:  # noqa: BLE001
-            base_url = config.model_config.openai_base_url or "default OpenAI endpoint"
-            raise RuntimeError(
-                f"OpenAI-compatible request failed for {base_url}: {exc.__class__.__name__}: {exc}"
-            ) from exc
-
-        usage = extract_openai_usage(response)
-        try:
-            content = extract_openai_content(response)
-        except EmptyModelResponseError:
-            record_response_usage(usage)
-            if attempt < MAX_EMPTY_RESPONSE_RETRIES:
-                continue
-            raise
-
-        return build_model_response(content, usage)
-
-    raise RuntimeError("Model retry loop ended unexpectedly.")
+def resolve_ollama_base_url(config: ModelConfig) -> str:
+    return config.ollama_base_url or "http://localhost:11434"
 
 
 def extract_ollama_content(response: object) -> str:
@@ -239,72 +189,129 @@ def extract_ollama_usage(response: object) -> TokenUsage:
     )
 
 
-def call_ollama(config: AgentConfig, user_prompt: str) -> ModelResponse:
-    ollama_model = require_config_value(
-        config.model_config.ollama_model,
-        "ollama_model",
-        "Ollama",
-    )
-    base_url = resolve_ollama_base_url(config).rstrip("/")
-    payload = json.dumps(
-        {
-            "model": ollama_model,
-            "system": config.system_prompt,
-            "prompt": user_prompt,
-            "stream": False,
-        }
-    ).encode("utf-8")
-    req = request.Request(
-        f"{base_url}/api/generate",
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
+class Model:
+    def __init__(self, config: ModelConfig, system_prompt: str) -> None:
+        self.config = config
+        self.system_prompt = system_prompt
+        self._openai_client: object | None = None
 
-    try:
-        with request.urlopen(req, timeout=config.model_config.timeout_seconds) as response:
-            body = response.read().decode("utf-8")
-    except error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace").strip()
-        raise RuntimeError(
-            f"Ollama request failed for {base_url}: HTTP {exc.code}: {detail or exc.reason}"
-        ) from exc
-    except error.URLError as exc:
-        raise RuntimeError(
-            f"Ollama request failed for {base_url}: {exc.__class__.__name__}: {exc.reason}"
-        ) from exc
-    except TimeoutError as exc:
-        raise RuntimeError(
-            f"Ollama request timed out after {config.model_config.timeout_seconds} seconds."
-        ) from exc
-    except Exception as exc:  # noqa: BLE001
-        raise RuntimeError(
-            f"Ollama request failed for {base_url}: {exc.__class__.__name__}: {exc}"
-        ) from exc
+    def call(self, user_prompt: str) -> ModelResponse:
+        if self.config.model == "openai-compatible":
+            response = self._call_openai_compatible(user_prompt)
+        elif self.config.model == "ollama":
+            response = self._call_ollama(user_prompt)
+        else:
+            raise ValueError(f"Unsupported model: {self.config.model}")
 
-    try:
-        parsed = json.loads(body)
-    except json.JSONDecodeError as exc:
-        raise RuntimeError(f"Ollama returned invalid JSON: {exc}") from exc
+        record_response_usage(response.token_usage)
+        return response
 
-    return build_model_response(
-        extract_ollama_content(parsed),
-        extract_ollama_usage(parsed),
-    )
+    def _get_openai_client(self) -> object:
+        if self._openai_client is not None:
+            return self._openai_client
 
+        try:
+            from openai import OpenAI
+        except ImportError as exc:
+            raise RuntimeError(
+                "OpenAI Python package not installed. Run pip install -r requirements.txt."
+            ) from exc
 
-def call_model_api(
-    config: AgentConfig,
-    user_prompt: str,
-) -> ModelResponse:
-    model = config.model_config.model
+        self._openai_client = OpenAI(
+            api_key=resolve_openai_api_key(self.config),
+            base_url=self.config.openai_base_url,
+            timeout=self.config.timeout_seconds,
+        )
+        return self._openai_client
 
-    if model == "openai-compatible":
-        response = call_openai_compatible(config, user_prompt)
-    elif model == "ollama":
-        response = call_ollama(config, user_prompt)
-    else:
-        raise ValueError(f"Unsupported model: {model}")
+    def _call_openai_compatible(self, user_prompt: str) -> ModelResponse:
+        openai_model = require_config_value(
+            self.config.openai_model,
+            "openai_model",
+            "OpenAI-compatible",
+        )
+        client = self._get_openai_client()
 
-    record_response_usage(response.token_usage)
-    return response
+        for attempt in range(MAX_EMPTY_RESPONSE_RETRIES + 1):
+            try:
+                response = client.chat.completions.create(
+                    model=openai_model,
+                    messages=[
+                        {"role": "system", "content": self.system_prompt},
+                        {"role": "user", "content": user_prompt},
+                    ],
+                )
+            except Exception as exc:  # noqa: BLE001
+                base_url = self.config.openai_base_url or "default OpenAI endpoint"
+                raise RuntimeError(
+                    f"OpenAI-compatible request failed for {base_url}: "
+                    f"{exc.__class__.__name__}: {exc}"
+                ) from exc
+
+            usage = extract_openai_usage(response)
+            try:
+                content = extract_openai_content(response)
+            except EmptyModelResponseError:
+                record_response_usage(usage)
+                if attempt < MAX_EMPTY_RESPONSE_RETRIES:
+                    continue
+                raise
+
+            return build_model_response(content, usage)
+
+        raise RuntimeError("Model retry loop ended unexpectedly.")
+
+    def _call_ollama(self, user_prompt: str) -> ModelResponse:
+        ollama_model = require_config_value(
+            self.config.ollama_model,
+            "ollama_model",
+            "Ollama",
+        )
+        base_url = resolve_ollama_base_url(self.config).rstrip("/")
+        payload = json.dumps(
+            {
+                "model": ollama_model,
+                "system": self.system_prompt,
+                "prompt": user_prompt,
+                "stream": False,
+            }
+        ).encode("utf-8")
+        req = request.Request(
+            f"{base_url}/api/generate",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+
+        try:
+            with request.urlopen(req, timeout=self.config.timeout_seconds) as response:
+                body = response.read().decode("utf-8")
+        except error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace").strip()
+            raise RuntimeError(
+                f"Ollama request failed for {base_url}: "
+                f"HTTP {exc.code}: {detail or exc.reason}"
+            ) from exc
+        except error.URLError as exc:
+            raise RuntimeError(
+                f"Ollama request failed for {base_url}: "
+                f"{exc.__class__.__name__}: {exc.reason}"
+            ) from exc
+        except TimeoutError as exc:
+            raise RuntimeError(
+                f"Ollama request timed out after {self.config.timeout_seconds} seconds."
+            ) from exc
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(
+                f"Ollama request failed for {base_url}: {exc.__class__.__name__}: {exc}"
+            ) from exc
+
+        try:
+            parsed = json.loads(body)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(f"Ollama returned invalid JSON: {exc}") from exc
+
+        return build_model_response(
+            extract_ollama_content(parsed),
+            extract_ollama_usage(parsed),
+        )

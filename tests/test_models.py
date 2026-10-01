@@ -9,10 +9,8 @@ import pytest
 from ark.inputs import AgentConfig
 from ark.models import (
     EmptyModelResponseError,
+    Model,
     ModelConfig,
-    call_model_api,
-    call_ollama,
-    call_openai_compatible,
     extract_ollama_content,
     extract_ollama_usage,
     extract_openai_content,
@@ -37,10 +35,11 @@ def build_openai_context() -> AgentConfig:
 
 
 def install_fake_openai(monkeypatch, responses: list[dict[str, object]]) -> dict[str, int]:
-    seen = {"calls": 0}
+    seen = {"calls": 0, "clients": 0}
 
     class FakeOpenAI:
         def __init__(self, **_kwargs: object) -> None:
+            seen["clients"] += 1
             self.chat = SimpleNamespace(
                 completions=SimpleNamespace(create=self.create_completion)
             )
@@ -52,6 +51,22 @@ def install_fake_openai(monkeypatch, responses: list[dict[str, object]]) -> dict
 
     monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=FakeOpenAI))
     return seen
+
+
+def test_model_reuses_openai_client(monkeypatch) -> None:
+    responses = [
+        {"choices": [{"message": {"content": "first"}}]},
+        {"choices": [{"message": {"content": "second"}}]},
+    ]
+    seen = install_fake_openai(monkeypatch, responses)
+    model = Model(build_openai_context().model_config, "system prompt")
+
+    first_response = model.call("first prompt")
+    second_response = model.call("second prompt")
+
+    assert first_response.content == "first"
+    assert second_response.content == "second"
+    assert seen == {"calls": 2, "clients": 1}
 
 
 def test_extract_openai_usage_uses_prompt_and_completion_tokens() -> None:
@@ -122,7 +137,7 @@ def test_extract_openai_content_reports_empty_response_details() -> None:
     assert 'response={"choices"' in message
 
 
-def test_call_model_api_retries_empty_openai_response(monkeypatch) -> None:
+def test_model_retries_empty_openai_response(monkeypatch) -> None:
     responses = [
         {
             "choices": [
@@ -145,14 +160,14 @@ def test_call_model_api_retries_empty_openai_response(monkeypatch) -> None:
         lambda usage: recorded_usage.append(usage.total_tokens),
     )
 
-    response = call_model_api(build_openai_context(), "workspace prompt")
+    response = build_openai_context().model.call("workspace prompt")
 
     assert response.content == "final answer"
     assert seen["calls"] == 2
     assert recorded_usage == [11, 8]
 
 
-def test_call_model_api_stops_after_second_empty_openai_response(monkeypatch) -> None:
+def test_model_stops_after_second_empty_openai_response(monkeypatch) -> None:
     empty_response = {
         "choices": [
             {
@@ -170,13 +185,13 @@ def test_call_model_api_stops_after_second_empty_openai_response(monkeypatch) ->
     )
 
     with pytest.raises(EmptyModelResponseError, match="without message content"):
-        call_model_api(build_openai_context(), "workspace prompt")
+        build_openai_context().model.call("workspace prompt")
 
     assert seen["calls"] == 2
     assert recorded_usage == [11, 11]
 
 
-def test_call_model_api_does_not_retry_openai_refusal(monkeypatch) -> None:
+def test_model_does_not_retry_openai_refusal(monkeypatch) -> None:
     refusal_response = {
         "choices": [
             {
@@ -189,13 +204,13 @@ def test_call_model_api_does_not_retry_openai_refusal(monkeypatch) -> None:
     seen = install_fake_openai(monkeypatch, [refusal_response])
 
     with pytest.raises(ValueError, match="refusal='policy'") as error:
-        call_model_api(build_openai_context(), "workspace prompt")
+        build_openai_context().model.call("workspace prompt")
 
     assert not isinstance(error.value, EmptyModelResponseError)
     assert seen["calls"] == 1
 
 
-def test_call_openai_compatible_uses_client_timeout(monkeypatch) -> None:
+def test_model_uses_openai_client_timeout(monkeypatch) -> None:
     config = AgentConfig(
         model_config=ModelConfig(
             model="openai-compatible",
@@ -224,7 +239,7 @@ def test_call_openai_compatible_uses_client_timeout(monkeypatch) -> None:
 
     monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=FakeOpenAI))
 
-    response = call_openai_compatible(config, "workspace prompt")
+    response = config.model.call("workspace prompt")
 
     assert response.content == "final answer"
     assert seen["client"] == {
@@ -263,7 +278,7 @@ def test_extract_ollama_usage_returns_unavailable_without_usage() -> None:
     assert usage.total_tokens is None
 
 
-def test_call_ollama_uses_local_endpoint(monkeypatch) -> None:
+def test_model_uses_local_ollama_endpoint(monkeypatch) -> None:
     config = AgentConfig(
         model_config=ModelConfig(
             model="ollama",
@@ -305,7 +320,7 @@ def test_call_ollama_uses_local_endpoint(monkeypatch) -> None:
 
     monkeypatch.setattr("ark.models.request.urlopen", fake_urlopen)
 
-    response = call_ollama(config, "workspace prompt")
+    response = config.model.call("workspace prompt")
 
     assert response.content == "Action: list_files\nAction Input:"
     assert response.token_usage.total_tokens == 14
@@ -319,7 +334,7 @@ def test_call_ollama_uses_local_endpoint(monkeypatch) -> None:
     }
 
 
-def test_call_ollama_requires_model_name() -> None:
+def test_model_requires_ollama_model_name() -> None:
     config = AgentConfig(
         model_config=ModelConfig(
             model="ollama",
@@ -337,4 +352,4 @@ def test_call_ollama_requires_model_name() -> None:
     )
 
     with pytest.raises(ValueError, match="Missing ollama_model"):
-        call_ollama(config, "workspace prompt")
+        config.model.call("workspace prompt")

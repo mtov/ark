@@ -4,10 +4,10 @@ import argparse
 import json
 import shutil
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from .models import ModelConfig
+from .models import Model, ModelConfig
 from .traces import clear_trace, trace_request, trace_workspace_event
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -28,6 +28,10 @@ class AgentConfig:
     source_workspace_path: Path
     workspace_path: Path
     snapshot_path: Path | None = None
+    model: Model = field(init=False, repr=False, compare=False)
+
+    def __post_init__(self) -> None:
+        self.model = Model(self.model_config, self.system_prompt)
 
 
 def _read_text_file(

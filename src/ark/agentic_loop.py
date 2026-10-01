@@ -17,7 +17,6 @@ from .inputs import (
     rollback_workspace_changes,
 )
 from .memory import Memory
-from .models import call_model_api
 from .protocol import ToolCall, parse_response, repair_response
 from .tools import run_tool
 from .traces import (
@@ -80,7 +79,7 @@ def invoke_model(config: AgentConfig, memory: Memory) -> ToolCall:
         "Agent history:\n"
         f"{memory.to_text()}"
     )
-    model_response = call_model_api(config, user_message)
+    model_response = config.model.call(user_message)
 
     try:
         tool_call = parse_response(model_response.content)
@@ -93,7 +92,7 @@ def invoke_model(config: AgentConfig, memory: Memory) -> ToolCall:
     return tool_call
 
 
-def process_finish(
+def try_finish(
     config: AgentConfig,
     memory: Memory,
     iteration: int,
@@ -135,7 +134,7 @@ def agentic_loop(config: AgentConfig) -> LoopResult:
             tool_call = invoke_model(config, memory)
 
             if tool_call.name == "finish":
-                finish_succeeded = process_finish(
+                finish_succeeded = try_finish(
                     config,
                     memory,
                     iteration,
