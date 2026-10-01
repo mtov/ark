@@ -74,7 +74,7 @@ def load_model_config() -> ModelConfig:
     return ModelConfig(
         timeout_seconds=raw_config["timeout_seconds"],
         openai_base_url=raw_config.get("openai_base_url"),
-        openai_model=raw_config.get("openai_model"),
+        openai_model=raw_config["openai_model"],
         openai_api_key_env=raw_config.get("openai_api_key_env"),
     )
 

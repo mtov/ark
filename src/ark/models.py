@@ -1,45 +1,41 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import cached_property
 import json
 import os
+from typing import Any
 
 from .traces import record_response_usage
-
-
-@dataclass
-class ModelConfig:
-    timeout_seconds: int
-    openai_base_url: str | None
-    openai_model: str | None
-    openai_api_key_env: str | None
-
-
-@dataclass
-class TokenUsage:
-    input_tokens: int | None = None
-    output_tokens: int | None = None
-    total_tokens: int | None = None
-
-
-@dataclass
-class ModelResponse:
-    content: str
-    token_usage: TokenUsage
 
 
 MAX_RESPONSE_DEBUG_CHARS = 2_000
 MAX_EMPTY_RESPONSE_RETRIES = 1
 
 
+@dataclass(frozen=True)
+class ModelConfig:
+    timeout_seconds: int
+    openai_base_url: str | None
+    openai_model: str
+    openai_api_key_env: str | None
+
+
+@dataclass(frozen=True)
+class TokenUsage:
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    total_tokens: int | None = None
+
+
+@dataclass(frozen=True)
+class ModelResponse:
+    content: str
+    token_usage: TokenUsage
+
+
 class EmptyModelResponseError(ValueError):
     pass
-
-
-def require_config_value(value: str | None, key: str, model_name: str) -> str:
-    if not value:
-        raise ValueError(f"Missing {key} for {model_name} model.")
-    return value
 
 
 def build_model_response(content: str, token_usage: TokenUsage | None = None) -> ModelResponse:
@@ -136,66 +132,53 @@ def extract_openai_usage(response: object) -> TokenUsage:
 
 
 def resolve_openai_api_key(config: ModelConfig) -> str:
-    api_key_env = config.openai_api_key_env
-    if api_key_env:
-        return require_config_value(
-            os.environ.get(api_key_env),
-            api_key_env,
-            "OpenAI-compatible",
-        )
+    env_name = config.openai_api_key_env
+    if env_name is None:
+        return os.environ.get("OPENAI_API_KEY", "ark")
 
-    return os.environ.get("OPENAI_API_KEY", "ark")
+    api_key = os.environ.get(env_name)
+    if not api_key:
+        raise ValueError(f"Missing {env_name} for OpenAI-compatible model.")
+    return api_key
 
 
 class Model:
     def __init__(self, config: ModelConfig, system_prompt: str) -> None:
         self.config = config
         self.system_prompt = system_prompt
-        self._openai_client: object | None = None
 
     def call(self, user_prompt: str) -> ModelResponse:
-        openai_model = require_config_value(
-            self.config.openai_model,
-            "openai_model",
-            "OpenAI-compatible",
-        )
-        client = self._get_openai_client()
-
-        for attempt in range(MAX_EMPTY_RESPONSE_RETRIES + 1):
+        for _ in range(MAX_EMPTY_RESPONSE_RETRIES):
             try:
-                response = client.chat.completions.create(
-                    model=openai_model,
-                    messages=[
-                        {"role": "system", "content": self.system_prompt},
-                        {"role": "user", "content": user_prompt},
-                    ],
-                )
-            except Exception as exc:  # noqa: BLE001
-                base_url = self.config.openai_base_url or "default OpenAI endpoint"
-                raise RuntimeError(
-                    f"OpenAI-compatible request failed for {base_url}: "
-                    f"{exc.__class__.__name__}: {exc}"
-                ) from exc
-
-            usage = extract_openai_usage(response)
-            try:
-                content = extract_openai_content(response)
+                return self._parse_response(self._request(user_prompt))
             except EmptyModelResponseError:
-                record_response_usage(usage)
-                if attempt < MAX_EMPTY_RESPONSE_RETRIES:
-                    continue
-                raise
+                pass
 
-            model_response = build_model_response(content, usage)
-            record_response_usage(model_response.token_usage)
-            return model_response
+        return self._parse_response(self._request(user_prompt))
 
-        raise RuntimeError("Model retry loop ended unexpectedly.")
+    def _parse_response(self, response: object) -> ModelResponse:
+        usage = extract_openai_usage(response)
+        record_response_usage(usage)
+        return build_model_response(extract_openai_content(response), usage)
 
-    def _get_openai_client(self) -> object:
-        if self._openai_client is not None:
-            return self._openai_client
+    def _request(self, user_prompt: str) -> object:
+        try:
+            return self._client.chat.completions.create(
+                model=self.config.openai_model,
+                messages=[
+                    {"role": "system", "content": self.system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+            )
+        except Exception as exc:  # noqa: BLE001
+            endpoint = self.config.openai_base_url or "default OpenAI endpoint"
+            raise RuntimeError(
+                f"OpenAI-compatible request failed for {endpoint}: "
+                f"{exc.__class__.__name__}: {exc}"
+            ) from exc
 
+    @cached_property
+    def _client(self) -> Any:
         try:
             from openai import OpenAI
         except ImportError as exc:
@@ -203,9 +186,8 @@ class Model:
                 "OpenAI Python package not installed. Run pip install -r requirements.txt."
             ) from exc
 
-        self._openai_client = OpenAI(
+        return OpenAI(
             api_key=resolve_openai_api_key(self.config),
             base_url=self.config.openai_base_url,
             timeout=self.config.timeout_seconds,
         )
-        return self._openai_client
