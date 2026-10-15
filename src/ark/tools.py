@@ -137,10 +137,7 @@ def run_tests_with_status(workspace_path: Path) -> tuple[bool, str]:
         return False, f"Could not run tests: {exc}"
 
     passed = result.returncode == 0
-    if passed:
-        print("Tests: passed", flush=True)
-    else:
-        print("Tests: failed", flush=True)
+    print("Tests: passed" if passed else "Tests: failed", flush=True)
 
     output = "\n".join(
         part for part in (result.stdout.strip(), result.stderr.strip()) if part

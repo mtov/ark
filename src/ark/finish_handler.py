@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 from .inputs import Context
 from .protocol import ToolCall
@@ -12,7 +13,7 @@ INVALID_FINISH_MESSAGE = "Finish action must have an empty Action Input."
 
 @dataclass
 class ApplyFinishResult:
-    status: str
+    status: Literal["invalid_finish", "post_apply_tests_failed", "completed"]
     test_output: str | None = None
 
 

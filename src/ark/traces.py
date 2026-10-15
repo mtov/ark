@@ -64,21 +64,14 @@ def trace_validation_error(reason: str, response: str) -> None:
     )
 
 
-def _edit_path(action_input: str) -> str | None:
-    for line in action_input.splitlines():
-        if line.startswith("path:"):
-            return line.removeprefix("path:").strip() or None
-    return None
-
-
 def _format_action(tool_call: ToolCall) -> str:
     args = tool_call.args.strip()
     action = tool_call.name
     if action == "list_files":
         return f"{action} {args or '.'}"
     if action == "edit_file":
-        path = _edit_path(args)
-        if path is not None:
+        path = tool_call.edit_path()
+        if path:
             return f"{action} {path}"
     if args and action != "finish":
         return f"{action} {args}"

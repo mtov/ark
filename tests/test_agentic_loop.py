@@ -5,7 +5,6 @@ from pathlib import Path
 from ark.agentic_loop import (
     FINISH_SUCCESS_MESSAGE,
     FINISH_WITHOUT_EDIT_MESSAGE,
-    LoopResult,
     MAX_ITERATIONS_REACHED_MESSAGE,
     agentic_loop,
     try_finish,
@@ -28,7 +27,6 @@ def build_context(tmp_path: Path) -> Context:
             api_key_env="OPENAI_API_KEY",
         ),
         user_prompt="prompt",
-        source_workspace_path=tmp_path,
         workspace_path=tmp_path,
     )
 
@@ -44,14 +42,19 @@ def tool_call_sequence(*tool_calls: ToolCall):
     return next_tool_call
 
 
-def test_loop_result_copies_tool_calls_from_memory(tmp_path: Path) -> None:
+def test_loop_result_copies_tool_calls_from_memory(monkeypatch, tmp_path: Path) -> None:
     context = build_context(tmp_path)
     context.memory.record_tool_call("read_file")
+    monkeypatch.setattr(
+        "ark.agentic_loop.invoke_model",
+        tool_call_sequence(ToolCall("done", "finish", "")),
+    )
+    monkeypatch.setattr("ark.agentic_loop.try_finish", lambda *_args: True)
 
-    result = LoopResult.success("done", context)
-    context.memory.record_tool_call("finish")
+    result = agentic_loop(context)
+    context.memory.record_tool_call("run_tests")
 
-    assert result.tools_called == ["read_file"]
+    assert result.tools_called == ["read_file", "finish"]
 
 
 def test_invoke_model_records_tool_call(monkeypatch, tmp_path: Path) -> None:

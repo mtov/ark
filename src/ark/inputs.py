@@ -7,6 +7,7 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from .cli_output import print_model_summary, print_user_prompt
 from .memory import Memory
 from .models import Model
 from .traces import clear_trace, trace_request, trace_workspace_event
@@ -25,7 +26,6 @@ IGNORED_WORKSPACE_NAMES = ("evaluation",)
 class Context:
     model: Model
     user_prompt: str
-    source_workspace_path: Path
     workspace_path: Path
     memory: Memory = field(default_factory=Memory)
     snapshot_path: Path | None = None
@@ -181,15 +181,6 @@ def build_user_prompt(user_prompt: str, workspace_instructions: str | None = Non
     )
 
 
-def print_model_summary(model: Model) -> None:
-    print(f"Using OpenAI model: {model.name}")
-
-
-def print_user_prompt(user_prompt: str) -> None:
-    print("Prompt:")
-    print(user_prompt)
-
-
 def prepare_run(workspace_path_arg: str) -> Context:
     clear_trace()
     source_workspace_path = resolve_workspace_path(workspace_path_arg)
@@ -209,6 +200,5 @@ def prepare_run(workspace_path_arg: str) -> Context:
     return Context(
         model=model,
         user_prompt=user_prompt,
-        source_workspace_path=source_workspace_path,
         workspace_path=workspace_path,
     )

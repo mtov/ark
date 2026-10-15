@@ -16,6 +16,12 @@ class ToolCall:
     name: str
     args: str
 
+    def edit_path(self) -> str | None:
+        for line in self.args.splitlines():
+            if line.startswith("path:"):
+                return line.removeprefix("path:").strip()
+        return None
+
 
 @dataclass(frozen=True)
 class EditFileRequest:

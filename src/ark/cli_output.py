@@ -1,10 +1,22 @@
 from __future__ import annotations
 
-from math import floor
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from .protocol import ToolCall
 from .traces import get_total_tokens
+
+if TYPE_CHECKING:
+    from .models import Model
+
+
+def print_model_summary(model: Model) -> None:
+    print(f"Using OpenAI model: {model.name}")
+
+
+def print_user_prompt(user_prompt: str) -> None:
+    print("Prompt:")
+    print(user_prompt)
 
 
 def format_iteration_action(tool_call: ToolCall) -> str:
@@ -39,9 +51,8 @@ def format_elapsed_time(elapsed_seconds: float) -> str:
     if total_seconds < 60:
         return f"Elapsed time: {total_seconds:.2f}s"
 
-    minutes = floor(total_seconds / 60)
-    seconds = total_seconds - (minutes * 60)
-    return f"Elapsed time: {minutes}m {seconds:.2f}s"
+    minutes, seconds = divmod(total_seconds, 60)
+    return f"Elapsed time: {int(minutes)}m {seconds:.2f}s"
 
 
 def print_elapsed_time(elapsed_seconds: float) -> None:
@@ -56,11 +67,11 @@ def format_success_message(result: str) -> str:
     return f"Ark result: success. {normalized_result}"
 
 
-def format_failure_message(error: Exception) -> str:
+def format_failure_message(error: str) -> str:
     return f"Ark result: failed. {error}"
 
 
-def print_failure_summary(error: Exception, elapsed_seconds: float) -> None:
+def print_failure_summary(error: str, elapsed_seconds: float) -> None:
     print_total_tokens()
     print_elapsed_time(elapsed_seconds)
     print(format_failure_message(error))
@@ -69,8 +80,4 @@ def print_failure_summary(error: Exception, elapsed_seconds: float) -> None:
 def print_success_summary(result: str, elapsed_seconds: float) -> None:
     print_total_tokens()
     print_elapsed_time(elapsed_seconds)
-    print_final_result(result)
-
-
-def print_final_result(result: str) -> None:
     print(format_success_message(result))

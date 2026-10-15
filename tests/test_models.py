@@ -23,7 +23,6 @@ def build_openai_context() -> Context:
             base_url="http://localhost:8000/v1",
         ),
         user_prompt="user prompt",
-        source_workspace_path=SimpleNamespace(),
         workspace_path=SimpleNamespace(),
     )
 
@@ -213,7 +212,6 @@ def test_model_uses_openai_client_timeout(monkeypatch) -> None:
             base_url="http://localhost:8000/v1",
         ),
         user_prompt="user prompt",
-        source_workspace_path=SimpleNamespace(),
         workspace_path=SimpleNamespace(),
     )
     seen: dict[str, object] = {}

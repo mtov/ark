@@ -17,7 +17,6 @@ def build_context(tmp_path: Path) -> Context:
             api_key_env="OPENAI_API_KEY",
         ),
         user_prompt="prompt",
-        source_workspace_path=tmp_path,
         workspace_path=tmp_path,
     )
 

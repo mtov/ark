@@ -58,7 +58,7 @@ class Memory:
             if (
                 entry.tool_call.name == "edit_file"
                 and entry.result.startswith("Edit applied successfully to ")
-                and self._edit_path(entry.tool_call) == normalized_path
+                and entry.tool_call.edit_path() == normalized_path
             ):
                 return False
 
@@ -80,19 +80,11 @@ class Memory:
         return items
 
     @staticmethod
-    def _edit_path(tool_call: ToolCall) -> str | None:
-        for line in tool_call.args.splitlines():
-            if line.startswith("path:"):
-                return line.removeprefix("path:").strip()
-
-        return None
-
-    @classmethod
-    def _context_args(cls, tool_call: ToolCall) -> str:
+    def _context_args(tool_call: ToolCall) -> str:
         if tool_call.name != "edit_file":
             return tool_call.args
 
-        edit_path = cls._edit_path(tool_call)
+        edit_path = tool_call.edit_path()
         if edit_path is not None:
             return f"path: {edit_path}"
 
