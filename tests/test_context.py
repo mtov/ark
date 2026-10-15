@@ -113,12 +113,7 @@ def test_skipped_reads_do_not_keep_file_contents_in_recent_context() -> None:
     history.append(1, read_call, "contents")
 
     for iteration in range(2, MAX_HISTORY_ENTRIES + 2):
-        history.append(
-            iteration,
-            read_call,
-            "Already available in recent context.",
-            skipped=True,
-        )
+        history.append(iteration, read_call, "Already available in recent context.", skipped=True)
 
     assert history.has_current_file_read("src/example.py") is False
 

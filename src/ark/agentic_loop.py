@@ -9,7 +9,6 @@ from .cli_output import (
     print_tool_call,
     print_success_summary,
 )
-from .finish_handler import INVALID_FINISH_MESSAGE, apply_finish
 from .inputs import (
     Context,
     commit_workspace_changes,
@@ -18,7 +17,7 @@ from .inputs import (
     rollback_workspace_changes,
 )
 from .protocol import ToolCall, parse_response, repair_response
-from .tools import run_tool
+from .tools import run_tests_with_status, run_tool
 from .traces import (
     trace_action,
     trace_error,
@@ -32,6 +31,7 @@ AGENTIC_LOOP_ERROR_MESSAGE = "agentic loop error"
 MAX_ITERATIONS = 20
 FINISH_SUCCESS_MESSAGE = "Changes applied and final tests passed."
 FINISH_WITHOUT_EDIT_MESSAGE = "Finish requires at least one approved edit_file action."
+INVALID_FINISH_MESSAGE = "Finish action must have an empty Action Input."
 
 
 @dataclass
@@ -42,19 +42,13 @@ class LoopResult:
 
 
 def invoke_model(context: Context) -> ToolCall:
-    user_message = (
-        "User task:\n"
-        f"{context.user_prompt}\n\n"
-        "Agent history:\n"
-        f"{context.memory.to_text()}"
-    )
-    model_response = context.model.call(user_message)
+    model_response = context.model.call(context.user_prompt, context.memory.to_text())
 
     try:
         tool_call = parse_response(model_response.content)
     except ValueError as exc:
         trace_validation_error(str(exc), model_response.content)
-        tool_call = repair_response(context, user_message, str(exc))
+        tool_call = repair_response(context, str(exc))
 
     trace_action(tool_call)
     context.memory.record_tool_call(tool_call.name)
@@ -66,30 +60,26 @@ def try_finish(
     iteration: int,
     tool_call: ToolCall,
 ) -> bool:
+    print_tool_call(iteration, tool_call)
+
     if not context.memory.has_successful_edit():
-        print_tool_call(iteration, tool_call)
         trace_finish_event("failed", "finish_validation", FINISH_WITHOUT_EDIT_MESSAGE)
         context.memory.append(iteration, tool_call, FINISH_WITHOUT_EDIT_MESSAGE)
         return False
 
-    finish_result = apply_finish(context, tool_call)
-    print_tool_call(iteration, tool_call)
-
-    if finish_result.status == "invalid_finish":
-        context.memory.append(
-            iteration,
-            tool_call,
-            INVALID_FINISH_MESSAGE,
-        )
+    if tool_call.args.strip():
+        trace_finish_event("failed", "finish_validation", INVALID_FINISH_MESSAGE)
+        context.memory.append(iteration, tool_call, INVALID_FINISH_MESSAGE)
         return False
 
+    tests_succeeded, test_output = run_tests_with_status(context.workspace_path)
+    if tests_succeeded:
+        trace_finish_event("completed", "finish")
+    else:
+        trace_finish_event("failed", "post_apply_tests", test_output)
     context.memory.record_tool_call("run_tests")
-    if finish_result.status == "post_apply_tests_failed":
-        context.memory.append(
-            iteration,
-            tool_call,
-            finish_result.test_output or "Tests failed without output.",
-        )
+    if not tests_succeeded:
+        context.memory.append(iteration, tool_call, test_output or "Tests failed without output.")
         return False
 
     return True
@@ -101,12 +91,7 @@ def agentic_loop(context: Context) -> LoopResult:
             tool_call = invoke_model(context)
 
             if tool_call.name == "finish":
-                finish_succeeded = try_finish(
-                    context,
-                    iteration,
-                    tool_call,
-                )
-                if not finish_succeeded:
+                if not try_finish(context, iteration, tool_call):
                     continue
 
                 commit_workspace_changes(context)
@@ -125,11 +110,7 @@ def agentic_loop(context: Context) -> LoopResult:
         return LoopResult(status="max_iterations_reached")
     except Exception as exc:  # noqa: BLE001
         rollback_workspace_changes(context, AGENTIC_LOOP_ERROR_MESSAGE)
-        return LoopResult(
-            status="failed",
-            error=str(exc),
-            error_type=exc.__class__.__name__,
-        )
+        return LoopResult(status="failed", error=str(exc), error_type=exc.__class__.__name__)
 
 
 def main() -> int:

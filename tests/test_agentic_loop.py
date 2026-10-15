@@ -8,6 +8,7 @@ import pytest
 from ark.agentic_loop import (
     FINISH_SUCCESS_MESSAGE,
     FINISH_WITHOUT_EDIT_MESSAGE,
+    INVALID_FINISH_MESSAGE,
     LoopResult,
     MAX_ITERATIONS_REACHED_MESSAGE,
     agentic_loop,
@@ -15,11 +16,10 @@ from ark.agentic_loop import (
     try_finish,
     invoke_model,
 )
-from ark.finish_handler import ApplyFinishResult
 from ark.inputs import Context
 from ark.memory import Memory
 from ark.models import Model, build_model_response
-from ark.protocol import ToolCall
+from ark.protocol import REPAIR_PROMPT, ToolCall
 from ark.tools import ToolResult
 
 
@@ -71,9 +71,7 @@ def test_main_reports_tool_calls_from_context(
         lambda: SimpleNamespace(workspace_path=str(tmp_path)),
     )
     monkeypatch.setattr("ark.agentic_loop.prepare_run", lambda _path: context)
-    monkeypatch.setattr(
-        "ark.agentic_loop.agentic_loop", lambda _context: loop_result
-    )
+    monkeypatch.setattr("ark.agentic_loop.agentic_loop", lambda _context: loop_result)
     monkeypatch.setattr(
         "ark.agentic_loop.trace_run_summary",
         lambda _elapsed, tools_called: summaries.append(tools_called.copy()),
@@ -89,7 +87,7 @@ def test_invoke_model_records_tool_call(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(
         Model,
         "call",
-        lambda _model, _prompt: build_model_response(
+        lambda _model, _prompt, _history: build_model_response(
             "Thought: inspect\nAction: read_file\nAction Input: example.py"
         ),
     )
@@ -103,23 +101,25 @@ def test_invoke_model_records_tool_call(monkeypatch, tmp_path: Path) -> None:
 
 def test_invoke_model_records_repaired_tool_call(monkeypatch, tmp_path: Path) -> None:
     context = build_context(tmp_path)
-    repaired_call = ToolCall("recover", "list_files", ".")
-    monkeypatch.setattr(
-        Model,
-        "call",
-        lambda _model, _prompt: build_model_response("Thought: invalid"),
-    )
-    monkeypatch.setattr(
-        "ark.agentic_loop.repair_response",
-        lambda *_args: repaired_call,
-    )
+    responses = iter(["Thought: invalid", "Thought: recover\nAction: list_files\nAction Input: ."])
+    requests: list[tuple[str, str]] = []
+
+    def call(_model: Model, user_prompt: str, history: str):
+        requests.append((user_prompt, history))
+        return build_model_response(next(responses))
+
+    monkeypatch.setattr(Model, "call", call)
     monkeypatch.setattr("ark.agentic_loop.trace_validation_error", lambda *_args: None)
     monkeypatch.setattr("ark.agentic_loop.trace_action", lambda _request: None)
 
     tool_call = invoke_model(context)
 
-    assert tool_call is repaired_call
+    assert tool_call == ToolCall("recover", "list_files", ".")
     assert context.memory.tools_called == ["list_files"]
+    assert requests == [
+        (context.user_prompt, "No previous steps."),
+        (context.user_prompt, f"No previous steps.\n\n{REPAIR_PROMPT}"),
+    ]
 
 
 def test_finish_retries_after_failed_tests_without_resetting_workspace(monkeypatch, tmp_path: Path) -> None:
@@ -129,23 +129,16 @@ def test_finish_retries_after_failed_tests_without_resetting_workspace(monkeypat
         ToolCall("second finish", "finish", ""),
     ])
     seen_histories: list[str] = []
-    attempts = 0
 
     def next_tool_call(context: Context) -> ToolCall:
-        nonlocal attempts
-        attempts += 1
         seen_histories.append(context.memory.to_text())
         tool_call = next(responses)
         context.memory.record_tool_call(tool_call.name)
         return tool_call
 
-    def finish(_context: Context, _tool_call: ToolCall) -> ApplyFinishResult:
-        if attempts == 1:
-            return ApplyFinishResult("post_apply_tests_failed", "1 failed")
-        return ApplyFinishResult("completed")
-
+    test_results = iter([(False, "1 failed"), (True, "3 passed")])
     monkeypatch.setattr("ark.agentic_loop.invoke_model", next_tool_call)
-    monkeypatch.setattr("ark.agentic_loop.apply_finish", finish)
+    monkeypatch.setattr("ark.agentic_loop.run_tests_with_status", lambda _path: next(test_results))
     monkeypatch.setattr(Memory, "has_successful_edit", lambda _memory: True)
 
     result = agentic_loop(context)
@@ -158,17 +151,67 @@ def test_finish_retries_after_failed_tests_without_resetting_workspace(monkeypat
 def test_finish_requires_an_approved_edit(monkeypatch, tmp_path: Path) -> None:
     context = build_context(tmp_path)
     finish_call = ToolCall("done", "finish", "")
-    apply_calls: list[ToolCall] = []
+    test_calls: list[Path] = []
     monkeypatch.setattr(
-        "ark.agentic_loop.apply_finish",
-        lambda _context, tool_call: apply_calls.append(tool_call),
+        "ark.agentic_loop.run_tests_with_status",
+        lambda path: test_calls.append(path),
     )
 
     result = try_finish(context, 1, finish_call)
 
     assert result is False
-    assert apply_calls == []
+    assert test_calls == []
     assert context.memory.entries[-1].result == FINISH_WITHOUT_EDIT_MESSAGE
+
+
+def test_finish_runs_final_tests(monkeypatch, tmp_path: Path) -> None:
+    context = build_context(tmp_path)
+    test_calls: list[Path] = []
+    events: list[tuple] = []
+
+    def run_tests(path: Path) -> tuple[bool, str]:
+        test_calls.append(path)
+        return True, "3 passed"
+
+    monkeypatch.setattr(Memory, "has_successful_edit", lambda _memory: True)
+    monkeypatch.setattr("ark.agentic_loop.run_tests_with_status", run_tests)
+    monkeypatch.setattr("ark.agentic_loop.trace_finish_event", lambda *args: events.append(args))
+
+    assert try_finish(context, 1, ToolCall("done", "finish", "")) is True
+    assert test_calls == [tmp_path]
+    assert context.memory.tools_called == ["run_tests"]
+    assert events == [("completed", "finish")]
+
+
+def test_finish_returns_failed_tests_without_reverting_edits(monkeypatch, tmp_path: Path) -> None:
+    context = build_context(tmp_path)
+    file_path = tmp_path / "example.py"
+    file_path.write_text("approved edit\n", encoding="utf-8")
+    events: list[tuple] = []
+    monkeypatch.setattr(Memory, "has_successful_edit", lambda _memory: True)
+    monkeypatch.setattr("ark.agentic_loop.run_tests_with_status", lambda _path: (False, "1 failed"))
+    monkeypatch.setattr("ark.agentic_loop.trace_finish_event", lambda *args: events.append(args))
+
+    assert try_finish(context, 1, ToolCall("done", "finish", "")) is False
+    assert context.memory.entries[-1].result == "1 failed"
+    assert context.memory.tools_called == ["run_tests"]
+    assert file_path.read_text(encoding="utf-8") == "approved edit\n"
+    assert events == [("failed", "post_apply_tests", "1 failed")]
+
+
+def test_finish_rejects_nonempty_input(monkeypatch, tmp_path: Path) -> None:
+    context = build_context(tmp_path)
+    test_calls: list[Path] = []
+    events: list[tuple] = []
+    monkeypatch.setattr(Memory, "has_successful_edit", lambda _memory: True)
+    monkeypatch.setattr("ark.agentic_loop.run_tests_with_status", lambda path: test_calls.append(path))
+    monkeypatch.setattr("ark.agentic_loop.trace_finish_event", lambda *args: events.append(args))
+
+    assert try_finish(context, 1, ToolCall("done", "finish", "patch")) is False
+    assert test_calls == []
+    assert context.memory.tools_called == []
+    assert context.memory.entries[-1].result == INVALID_FINISH_MESSAGE
+    assert events == [("failed", "finish_validation", INVALID_FINISH_MESSAGE)]
 
 
 def test_approved_edit_is_kept_after_successful_finish(monkeypatch, tmp_path: Path) -> None:
@@ -184,11 +227,8 @@ def test_approved_edit_is_kept_after_successful_finish(monkeypatch, tmp_path: Pa
         ToolCall("done", "finish", ""),
     ])
     monkeypatch.setattr("builtins.input", lambda _prompt: "y")
-    monkeypatch.setattr(
-        "ark.agentic_loop.invoke_model",
-        tool_call_sequence(*responses),
-    )
-    monkeypatch.setattr("ark.agentic_loop.apply_finish", lambda *_args: ApplyFinishResult("completed"))
+    monkeypatch.setattr("ark.agentic_loop.invoke_model", tool_call_sequence(*responses))
+    monkeypatch.setattr("ark.agentic_loop.run_tests_with_status", lambda _path: (True, "3 passed"))
 
     result = agentic_loop(context)
 
@@ -214,10 +254,7 @@ def test_max_iterations_rolls_back_transaction(monkeypatch, tmp_path: Path) -> N
         tool_call_sequence(ToolCall("explore", "list_files", ".")),
     )
     monkeypatch.setattr("ark.agentic_loop.MAX_ITERATIONS", 1)
-    monkeypatch.setattr(
-        "ark.agentic_loop.run_tool",
-        lambda *_args: ToolResult("files"),
-    )
+    monkeypatch.setattr("ark.agentic_loop.run_tool", lambda *_args: ToolResult("files"))
 
     result = agentic_loop(context)
 

@@ -191,14 +191,7 @@ def prepare_run(workspace_path_arg: str) -> Context:
     workspace_instructions = load_workspace_instructions(workspace_path)
     if workspace_instructions is not None:
         print("Loading AGENTS.md")
-    user_prompt = build_user_prompt(
-        load_user_prompt(workspace_path),
-        workspace_instructions,
-    )
+    user_prompt = build_user_prompt(load_user_prompt(workspace_path), workspace_instructions)
     print_user_prompt(user_prompt)
     trace_request(user_prompt)
-    return Context(
-        model=model,
-        user_prompt=user_prompt,
-        workspace_path=workspace_path,
-    )
+    return Context(model=model, user_prompt=user_prompt, workspace_path=workspace_path)

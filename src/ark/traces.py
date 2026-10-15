@@ -58,10 +58,7 @@ def record_response_usage(token_usage: TokenUsage | None = None) -> None:
 
 
 def trace_validation_error(reason: str, response: str) -> None:
-    _append_event(
-        "validation_error",
-        [f"reason: {reason}", "response:", response],
-    )
+    _append_event("validation_error", [f"reason: {reason}", "response:", response])
 
 
 def _format_action(tool_call: ToolCall) -> str:
@@ -138,9 +135,7 @@ def trace_error(
 
 
 def _format_tool_counts(tools_called: list[str]) -> str:
-    return ", ".join(
-        f"{tool}={count}" for tool, count in Counter(tools_called).items()
-    )
+    return ", ".join(f"{tool}={count}" for tool, count in Counter(tools_called).items())
 
 
 def trace_run_summary(elapsed_seconds: float, tools_called: list[str]) -> None:

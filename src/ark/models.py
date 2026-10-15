@@ -131,14 +131,15 @@ class Model:
     base_url: str | None = None
     api_key_env: str | None = None
 
-    def call(self, user_prompt: str) -> ModelResponse:
+    def call(self, user_prompt: str, history: str) -> ModelResponse:
+        user_message = f"User task:\n{user_prompt}\n\nAgent history:\n{history}"
         for _ in range(MAX_EMPTY_RESPONSE_RETRIES):
             try:
-                return self._parse_response(self._request(user_prompt))
+                return self._parse_response(self._request(user_message))
             except EmptyModelResponseError:
                 pass
 
-        return self._parse_response(self._request(user_prompt))
+        return self._parse_response(self._request(user_message))
 
     def _parse_response(self, response: object) -> ModelResponse:
         usage = extract_openai_usage(response)
@@ -170,11 +171,7 @@ class Model:
                 "OpenAI Python package not installed. Run pip install -r requirements.txt."
             ) from exc
 
-        return OpenAI(
-            api_key=self._api_key(),
-            base_url=self.base_url,
-            timeout=self.timeout_seconds,
-        )
+        return OpenAI(api_key=self._api_key(), base_url=self.base_url, timeout=self.timeout_seconds)
 
     def _api_key(self) -> str:
         if self.api_key_env is None:
@@ -182,7 +179,5 @@ class Model:
 
         api_key = os.environ.get(self.api_key_env)
         if not api_key:
-            raise ValueError(
-                f"Missing {self.api_key_env} for OpenAI-compatible model."
-            )
+            raise ValueError(f"Missing {self.api_key_env} for OpenAI-compatible model.")
         return api_key

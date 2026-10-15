@@ -33,9 +33,7 @@ def install_fake_openai(monkeypatch, responses: list[dict[str, object]]) -> dict
     class FakeOpenAI:
         def __init__(self, **_kwargs: object) -> None:
             seen["clients"] += 1
-            self.chat = SimpleNamespace(
-                completions=SimpleNamespace(create=self.create_completion)
-            )
+            self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create_completion))
 
         def create_completion(self, **_kwargs: object) -> dict[str, object]:
             response = responses[seen["calls"]]
@@ -54,8 +52,8 @@ def test_model_reuses_openai_client(monkeypatch) -> None:
     seen = install_fake_openai(monkeypatch, responses)
     model = build_openai_context().model
 
-    first_response = model.call("first prompt")
-    second_response = model.call("second prompt")
+    first_response = model.call("first prompt", "first history")
+    second_response = model.call("second prompt", "second history")
 
     assert first_response.content == "first"
     assert second_response.content == "second"
@@ -153,7 +151,7 @@ def test_model_retries_empty_openai_response(monkeypatch) -> None:
         lambda usage: recorded_usage.append(usage.total_tokens),
     )
 
-    response = build_openai_context().model.call("workspace prompt")
+    response = build_openai_context().model.call("workspace prompt", "history")
 
     assert response.content == "final answer"
     assert seen["calls"] == 2
@@ -178,7 +176,7 @@ def test_model_stops_after_second_empty_openai_response(monkeypatch) -> None:
     )
 
     with pytest.raises(EmptyModelResponseError, match="without message content"):
-        build_openai_context().model.call("workspace prompt")
+        build_openai_context().model.call("workspace prompt", "history")
 
     assert seen["calls"] == 2
     assert recorded_usage == [11, 11]
@@ -197,7 +195,7 @@ def test_model_does_not_retry_openai_refusal(monkeypatch) -> None:
     seen = install_fake_openai(monkeypatch, [refusal_response])
 
     with pytest.raises(ValueError, match="refusal='policy'") as error:
-        build_openai_context().model.call("workspace prompt")
+        build_openai_context().model.call("workspace prompt", "history")
 
     assert not isinstance(error.value, EmptyModelResponseError)
     assert seen["calls"] == 1
@@ -219,9 +217,7 @@ def test_model_uses_openai_client_timeout(monkeypatch) -> None:
     class FakeOpenAI:
         def __init__(self, **kwargs: object) -> None:
             seen["client"] = kwargs
-            self.chat = SimpleNamespace(
-                completions=SimpleNamespace(create=self.create_completion)
-            )
+            self.chat = SimpleNamespace(completions=SimpleNamespace(create=self.create_completion))
 
         def create_completion(self, **kwargs: object) -> dict[str, object]:
             seen["completion"] = kwargs
@@ -229,7 +225,7 @@ def test_model_uses_openai_client_timeout(monkeypatch) -> None:
 
     monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=FakeOpenAI))
 
-    response = context.model.call("workspace prompt")
+    response = context.model.call("workspace prompt", "history")
 
     assert response.content == "final answer"
     assert seen["client"] == {
@@ -241,6 +237,6 @@ def test_model_uses_openai_client_timeout(monkeypatch) -> None:
         "model": "local-model",
         "messages": [
             {"role": "system", "content": "system prompt"},
-            {"role": "user", "content": "workspace prompt"},
+            {"role": "user", "content": "User task:\nworkspace prompt\n\nAgent history:\nhistory"},
         ],
     }

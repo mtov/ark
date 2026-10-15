@@ -67,11 +67,7 @@ def test_trace_action_uses_one_line_for_action_and_arguments(monkeypatch, tmp_pa
     traces.clear_trace()
     traces.record_response_usage()
     traces.trace_action(
-        ToolCall(
-            thought="Inspect the implementation.",
-            name="read_file",
-            args="src/products.py",
-        )
+        ToolCall(thought="Inspect the implementation.", name="read_file", args="src/products.py")
     )
 
     content = log_path.read_text(encoding="utf-8")

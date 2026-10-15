@@ -43,10 +43,7 @@ def test_run_tool_skips_file_read_already_in_recent_context(tmp_path: Path) -> N
     context = build_context(tmp_path)
     context.memory.append(1, ToolCall("inspect", "read_file", "example.txt"), "hello")
 
-    result = tools.run_tool(
-        ToolCall("inspect again", "read_file", "example.txt"),
-        context,
-    )
+    result = tools.run_tool(ToolCall("inspect again", "read_file", "example.txt"), context)
 
     assert result.output == (
         "This read_file result is already available in the recent context. "

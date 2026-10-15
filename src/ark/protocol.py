@@ -86,8 +86,8 @@ def parse_edit_file_request(text: str) -> EditFileRequest:
     )
 
 
-def repair_response(context: Context, user_message: str, reason: str) -> ToolCall:
+def repair_response(context: Context, reason: str) -> ToolCall:
     trace_repair_attempt("Protocol repair", reason)
-    repair_message = f"{user_message}\n\n{REPAIR_PROMPT}"
-    response = context.model.call(repair_message)
+    repair_history = f"{context.memory.to_text()}\n\n{REPAIR_PROMPT}"
+    response = context.model.call(context.user_prompt, repair_history)
     return parse_response(response.content)
