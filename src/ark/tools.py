@@ -8,8 +8,7 @@ from difflib import unified_diff
 from pathlib import Path
 
 from .guards import resolve_tool_path
-from .inputs import AgentConfig, create_workspace_snapshot
-from .memory import Memory
+from .inputs import Context, create_workspace_snapshot
 from .protocol import ToolCall, parse_edit_file_request
 from .traces import trace_edit_event, trace_test_event
 
@@ -178,14 +177,14 @@ def _request_edit_approval(path: str, diff: str) -> bool:
     return input("Authorize edit? [y/N]: ").strip().lower() in {"y", "yes"}
 
 
-def edit_file(action_input: str, config: AgentConfig) -> str:
+def edit_file(action_input: str, context: Context) -> str:
     try:
         edit = parse_edit_file_request(action_input)
     except ValueError as exc:
         trace_edit_event("failed", "<invalid>", detail=str(exc))
         return str(exc)
 
-    path = _resolve_workspace_target(edit.path, config.workspace_path)
+    path = _resolve_workspace_target(edit.path, context.workspace_path)
     if isinstance(path, str):
         trace_edit_event("failed", edit.path, detail=path)
         return path
@@ -219,7 +218,7 @@ def edit_file(action_input: str, config: AgentConfig) -> str:
         trace_edit_event("rejected", edit.path, diff=diff)
         return f"Edit rejected by user for {edit.path}."
 
-    create_workspace_snapshot(config)
+    create_workspace_snapshot(context)
     path.write_text(updated_text, encoding="utf-8")
     trace_edit_event("succeeded", edit.path, diff=diff)
     return f"Edit applied successfully to {edit.path}."
@@ -227,15 +226,14 @@ def edit_file(action_input: str, config: AgentConfig) -> str:
 
 def run_tool(
     tool_call: ToolCall,
-    config: AgentConfig,
-    memory: Memory,
+    context: Context,
 ) -> ToolResult:
-    workspace_path = config.workspace_path
+    workspace_path = context.workspace_path
 
     if tool_call.name == "list_files":
         return ToolResult(list_files(tool_call.args, workspace_path))
     if tool_call.name == "read_file":
-        if memory.has_current_file_read(tool_call.args):
+        if context.memory.has_current_file_read(tool_call.args):
             return ToolResult(
                 "This read_file result is already available in the recent context. "
                 "Use the existing observation instead of reading the file again.",
@@ -248,7 +246,7 @@ def run_tool(
     if tool_call.name == "run_tests":
         return ToolResult(run_tests(workspace_path))
     if tool_call.name == "edit_file":
-        return ToolResult(edit_file(tool_call.args, config))
+        return ToolResult(edit_file(tool_call.args, context))
 
     return ToolResult(
         f"Unsupported action '{tool_call.name}'. Use list_files, read_file, find_text, run_tests, edit_file, or finish."

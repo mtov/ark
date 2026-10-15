@@ -7,20 +7,20 @@ from ark.agentic_loop import (
     FINISH_WITHOUT_EDIT_MESSAGE,
     LoopResult,
     MAX_ITERATIONS_REACHED_MESSAGE,
-    Memory,
     agentic_loop,
     try_finish,
     invoke_model,
 )
 from ark.finish_handler import ApplyFinishResult
-from ark.inputs import AgentConfig
+from ark.inputs import Context
+from ark.memory import Memory
 from ark.models import Model, build_model_response
 from ark.protocol import ToolCall
 from ark.tools import ToolResult
 
 
-def build_context(tmp_path: Path) -> AgentConfig:
-    return AgentConfig(
+def build_context(tmp_path: Path) -> Context:
+    return Context(
         model=Model(
             name="model",
             system_prompt="system",
@@ -36,26 +36,26 @@ def build_context(tmp_path: Path) -> AgentConfig:
 def tool_call_sequence(*tool_calls: ToolCall):
     responses = iter(tool_calls)
 
-    def next_tool_call(_config: AgentConfig, memory: Memory) -> ToolCall:
+    def next_tool_call(context: Context) -> ToolCall:
         tool_call = next(responses)
-        memory.record_tool_call(tool_call.name)
+        context.memory.record_tool_call(tool_call.name)
         return tool_call
 
     return next_tool_call
 
 
-def test_loop_result_copies_tool_calls_from_memory() -> None:
-    memory = Memory(tools_called=["read_file"])
+def test_loop_result_copies_tool_calls_from_memory(tmp_path: Path) -> None:
+    context = build_context(tmp_path)
+    context.memory.record_tool_call("read_file")
 
-    result = LoopResult.success("done", memory)
-    memory.record_tool_call("finish")
+    result = LoopResult.success("done", context)
+    context.memory.record_tool_call("finish")
 
     assert result.tools_called == ["read_file"]
 
 
 def test_invoke_model_records_tool_call(monkeypatch, tmp_path: Path) -> None:
-    memory = Memory()
-    config = build_context(tmp_path)
+    context = build_context(tmp_path)
     monkeypatch.setattr(
         Model,
         "call",
@@ -65,15 +65,14 @@ def test_invoke_model_records_tool_call(monkeypatch, tmp_path: Path) -> None:
     )
     monkeypatch.setattr("ark.agentic_loop.trace_action", lambda _request: None)
 
-    tool_call = invoke_model(config, memory)
+    tool_call = invoke_model(context)
 
     assert tool_call.name == "read_file"
-    assert memory.tools_called == ["read_file"]
+    assert context.memory.tools_called == ["read_file"]
 
 
 def test_invoke_model_records_repaired_tool_call(monkeypatch, tmp_path: Path) -> None:
-    memory = Memory()
-    config = build_context(tmp_path)
+    context = build_context(tmp_path)
     repaired_call = ToolCall("recover", "list_files", ".")
     monkeypatch.setattr(
         Model,
@@ -87,10 +86,10 @@ def test_invoke_model_records_repaired_tool_call(monkeypatch, tmp_path: Path) ->
     monkeypatch.setattr("ark.agentic_loop.trace_validation_error", lambda *_args: None)
     monkeypatch.setattr("ark.agentic_loop.trace_action", lambda _request: None)
 
-    tool_call = invoke_model(config, memory)
+    tool_call = invoke_model(context)
 
     assert tool_call is repaired_call
-    assert memory.tools_called == ["list_files"]
+    assert context.memory.tools_called == ["list_files"]
 
 
 def test_finish_retries_after_failed_tests_without_resetting_workspace(monkeypatch, tmp_path: Path) -> None:
@@ -102,15 +101,15 @@ def test_finish_retries_after_failed_tests_without_resetting_workspace(monkeypat
     seen_histories: list[str] = []
     attempts = 0
 
-    def next_tool_call(_config: AgentConfig, memory: Memory) -> ToolCall:
+    def next_tool_call(context: Context) -> ToolCall:
         nonlocal attempts
         attempts += 1
-        seen_histories.append(memory.to_text())
+        seen_histories.append(context.memory.to_text())
         tool_call = next(responses)
-        memory.record_tool_call(tool_call.name)
+        context.memory.record_tool_call(tool_call.name)
         return tool_call
 
-    def finish(_config: AgentConfig, _tool_call: ToolCall) -> ApplyFinishResult:
+    def finish(_context: Context, _tool_call: ToolCall) -> ApplyFinishResult:
         if attempts == 1:
             return ApplyFinishResult("post_apply_tests_failed", "1 failed")
         return ApplyFinishResult("completed")
@@ -128,19 +127,19 @@ def test_finish_retries_after_failed_tests_without_resetting_workspace(monkeypat
 
 
 def test_finish_requires_an_approved_edit(monkeypatch, tmp_path: Path) -> None:
-    memory = Memory()
+    context = build_context(tmp_path)
     finish_call = ToolCall("done", "finish", "")
     apply_calls: list[ToolCall] = []
     monkeypatch.setattr(
         "ark.agentic_loop.apply_finish",
-        lambda _config, tool_call: apply_calls.append(tool_call),
+        lambda _context, tool_call: apply_calls.append(tool_call),
     )
 
-    result = try_finish(build_context(tmp_path), memory, 1, finish_call)
+    result = try_finish(context, 1, finish_call)
 
     assert result is False
     assert apply_calls == []
-    assert memory.entries[-1].result == FINISH_WITHOUT_EDIT_MESSAGE
+    assert context.memory.entries[-1].result == FINISH_WITHOUT_EDIT_MESSAGE
 
 
 def test_approved_edit_is_kept_after_successful_finish(monkeypatch, tmp_path: Path) -> None:
@@ -203,7 +202,7 @@ def test_agentic_loop_returns_failure_with_tool_history(monkeypatch, tmp_path: P
     context = build_context(tmp_path)
     monkeypatch.setattr(
         "ark.agentic_loop.invoke_model",
-        lambda _config, _memory: (_ for _ in ()).throw(ValueError("missing content")),
+        lambda _context: (_ for _ in ()).throw(ValueError("missing content")),
     )
 
     result = agentic_loop(context)

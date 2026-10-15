@@ -137,16 +137,16 @@ def test_prepare_run_keeps_agents_md_out_of_system_prompt(tmp_path: Path, monkey
     monkeypatch.setattr(inputs, "SYSTEM_PROMPT_PATH", system_prompt_path)
     monkeypatch.setattr(inputs, "trace_request", lambda prompt: traced_requests.append(prompt))
 
-    config = inputs.prepare_run(str(source_workspace))
+    context = inputs.prepare_run(str(source_workspace))
 
-    assert config.model.system_prompt == (
+    assert context.model.system_prompt == (
         "Base system prompt.\n\n"
         "Workspace root:\n"
         f"{runtime_workspace}"
     )
-    assert config.user_prompt == (
+    assert context.user_prompt == (
         "Fix the bug.\n\n"
         "Workspace instructions:\n"
         "Always read the failing test before editing."
     )
-    assert traced_requests == [config.user_prompt]
+    assert traced_requests == [context.user_prompt]

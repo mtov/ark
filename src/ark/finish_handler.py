@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .inputs import AgentConfig
+from .inputs import Context
 from .protocol import ToolCall
 from .traces import trace_finish_event
 from .tools import run_tests_with_status
@@ -17,7 +17,7 @@ class ApplyFinishResult:
 
 
 def apply_finish(
-    config: AgentConfig,
+    context: Context,
     tool_call: ToolCall,
 ) -> ApplyFinishResult:
     if tool_call.args.strip():
@@ -28,7 +28,7 @@ def apply_finish(
         )
         return ApplyFinishResult(status="invalid_finish")
 
-    tests_succeeded, test_output = run_tests_with_status(config.workspace_path)
+    tests_succeeded, test_output = run_tests_with_status(context.workspace_path)
     if not tests_succeeded:
         trace_finish_event("failed", "post_apply_tests", test_output)
         return ApplyFinishResult(

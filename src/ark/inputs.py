@@ -4,9 +4,10 @@ import argparse
 import json
 import shutil
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
+from .memory import Memory
 from .models import Model
 from .traces import clear_trace, trace_request, trace_workspace_event
 
@@ -21,11 +22,12 @@ IGNORED_WORKSPACE_NAMES = ("evaluation",)
 
 
 @dataclass
-class AgentConfig:
+class Context:
     model: Model
     user_prompt: str
     source_workspace_path: Path
     workspace_path: Path
+    memory: Memory = field(default_factory=Memory)
     snapshot_path: Path | None = None
 
 
@@ -117,40 +119,40 @@ def prepare_runtime_workspace(source_workspace_path: Path) -> Path:
     return RUNTIME_WORKSPACE_PATH
 
 
-def create_workspace_snapshot(config: AgentConfig) -> None:
-    if config.snapshot_path is not None:
+def create_workspace_snapshot(context: Context) -> None:
+    if context.snapshot_path is not None:
         return
 
     snapshot_parent = Path(tempfile.mkdtemp(prefix="ark-workspace-snapshot-"))
     snapshot_path = snapshot_parent / "workspace"
-    shutil.copytree(config.workspace_path, snapshot_path)
-    config.snapshot_path = snapshot_path
+    shutil.copytree(context.workspace_path, snapshot_path)
+    context.snapshot_path = snapshot_path
 
 
-def _discard_workspace_snapshot(config: AgentConfig) -> None:
-    snapshot_path = config.snapshot_path
+def _discard_workspace_snapshot(context: Context) -> None:
+    snapshot_path = context.snapshot_path
     if snapshot_path is None:
         return
 
     shutil.rmtree(snapshot_path.parent)
-    config.snapshot_path = None
+    context.snapshot_path = None
 
 
-def commit_workspace_changes(config: AgentConfig) -> None:
-    if config.snapshot_path is None:
+def commit_workspace_changes(context: Context) -> None:
+    if context.snapshot_path is None:
         return
 
-    _discard_workspace_snapshot(config)
+    _discard_workspace_snapshot(context)
     trace_workspace_event("committed")
 
 
-def rollback_workspace_changes(config: AgentConfig, reason: str | None = None) -> None:
-    if config.snapshot_path is None:
+def rollback_workspace_changes(context: Context, reason: str | None = None) -> None:
+    if context.snapshot_path is None:
         return
 
-    shutil.rmtree(config.workspace_path)
-    shutil.copytree(config.snapshot_path, config.workspace_path)
-    _discard_workspace_snapshot(config)
+    shutil.rmtree(context.workspace_path)
+    shutil.copytree(context.snapshot_path, context.workspace_path)
+    _discard_workspace_snapshot(context)
     trace_workspace_event("rolled_back", reason)
 
 
@@ -188,7 +190,7 @@ def print_user_prompt(user_prompt: str) -> None:
     print(user_prompt)
 
 
-def prepare_run(workspace_path_arg: str) -> AgentConfig:
+def prepare_run(workspace_path_arg: str) -> Context:
     clear_trace()
     source_workspace_path = resolve_workspace_path(workspace_path_arg)
     workspace_path = prepare_runtime_workspace(source_workspace_path)
@@ -204,7 +206,7 @@ def prepare_run(workspace_path_arg: str) -> AgentConfig:
     )
     print_user_prompt(user_prompt)
     trace_request(user_prompt)
-    return AgentConfig(
+    return Context(
         model=model,
         user_prompt=user_prompt,
         source_workspace_path=source_workspace_path,

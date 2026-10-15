@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from ark.inputs import AgentConfig
+from ark.inputs import Context
 from ark.models import (
     EmptyModelResponseError,
     Model,
@@ -14,8 +14,8 @@ from ark.models import (
 )
 
 
-def build_openai_context() -> AgentConfig:
-    return AgentConfig(
+def build_openai_context() -> Context:
+    return Context(
         model=Model(
             name="local-model",
             system_prompt="system prompt",
@@ -205,7 +205,7 @@ def test_model_does_not_retry_openai_refusal(monkeypatch) -> None:
 
 
 def test_model_uses_openai_client_timeout(monkeypatch) -> None:
-    config = AgentConfig(
+    context = Context(
         model=Model(
             name="local-model",
             system_prompt="system prompt",
@@ -231,7 +231,7 @@ def test_model_uses_openai_client_timeout(monkeypatch) -> None:
 
     monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=FakeOpenAI))
 
-    response = config.model.call("workspace prompt")
+    response = context.model.call("workspace prompt")
 
     assert response.content == "final answer"
     assert seen["client"] == {

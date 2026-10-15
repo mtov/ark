@@ -10,13 +10,12 @@ from .cli_output import (
 )
 from .finish_handler import INVALID_FINISH_MESSAGE, apply_finish
 from .inputs import (
-    AgentConfig,
+    Context,
     commit_workspace_changes,
     parse_args,
     prepare_run,
     rollback_workspace_changes,
 )
-from .memory import Memory
 from .protocol import ToolCall, parse_response, repair_response
 from .tools import run_tool
 from .traces import (
@@ -46,78 +45,77 @@ class LoopResult:
     def success(
         cls,
         output: str,
-        memory: Memory,
+        context: Context,
     ) -> LoopResult:
         return cls(
             status="success",
             output=output,
-            tools_called=memory.tools_called.copy(),
+            tools_called=context.memory.tools_called.copy(),
         )
 
     @classmethod
-    def max_iterations_reached(cls, memory: Memory) -> LoopResult:
+    def max_iterations_reached(cls, context: Context) -> LoopResult:
         return cls(
             status="max_iterations_reached",
             error=MAX_ITERATIONS_REACHED_MESSAGE,
-            tools_called=memory.tools_called.copy(),
+            tools_called=context.memory.tools_called.copy(),
         )
 
     @classmethod
-    def failure(cls, error: Exception, memory: Memory) -> LoopResult:
+    def failure(cls, error: Exception, context: Context) -> LoopResult:
         return cls(
             status="failed",
             error=str(error),
             error_type=error.__class__.__name__,
-            tools_called=memory.tools_called.copy(),
+            tools_called=context.memory.tools_called.copy(),
         )
 
 
-def invoke_model(config: AgentConfig, memory: Memory) -> ToolCall:
+def invoke_model(context: Context) -> ToolCall:
     user_message = (
         "User task:\n"
-        f"{config.user_prompt}\n\n"
+        f"{context.user_prompt}\n\n"
         "Agent history:\n"
-        f"{memory.to_text()}"
+        f"{context.memory.to_text()}"
     )
-    model_response = config.model.call(user_message)
+    model_response = context.model.call(user_message)
 
     try:
         tool_call = parse_response(model_response.content)
     except ValueError as exc:
         trace_validation_error(str(exc), model_response.content)
-        tool_call = repair_response(config, user_message, str(exc))
+        tool_call = repair_response(context, user_message, str(exc))
 
     trace_action(tool_call)
-    memory.record_tool_call(tool_call.name)
+    context.memory.record_tool_call(tool_call.name)
     return tool_call
 
 
 def try_finish(
-    config: AgentConfig,
-    memory: Memory,
+    context: Context,
     iteration: int,
     tool_call: ToolCall,
 ) -> bool:
-    if not memory.has_successful_edit():
+    if not context.memory.has_successful_edit():
         print_tool_call(iteration, tool_call)
         trace_finish_event("failed", "finish_validation", FINISH_WITHOUT_EDIT_MESSAGE)
-        memory.append(iteration, tool_call, FINISH_WITHOUT_EDIT_MESSAGE)
+        context.memory.append(iteration, tool_call, FINISH_WITHOUT_EDIT_MESSAGE)
         return False
 
-    finish_result = apply_finish(config, tool_call)
+    finish_result = apply_finish(context, tool_call)
     print_tool_call(iteration, tool_call)
 
     if finish_result.status == "invalid_finish":
-        memory.append(
+        context.memory.append(
             iteration,
             tool_call,
             INVALID_FINISH_MESSAGE,
         )
         return False
 
-    memory.record_tool_call("run_tests")
+    context.memory.record_tool_call("run_tests")
     if finish_result.status == "post_apply_tests_failed":
-        memory.append(
+        context.memory.append(
             iteration,
             tool_call,
             finish_result.test_output or "Tests failed without output.",
@@ -127,52 +125,50 @@ def try_finish(
     return True
 
 
-def agentic_loop(config: AgentConfig) -> LoopResult:
-    memory = Memory()
+def agentic_loop(context: Context) -> LoopResult:
     try:
         for iteration in range(1, MAX_ITERATIONS + 1):
-            tool_call = invoke_model(config, memory)
+            tool_call = invoke_model(context)
 
             if tool_call.name == "finish":
                 finish_succeeded = try_finish(
-                    config,
-                    memory,
+                    context,
                     iteration,
                     tool_call,
                 )
                 if not finish_succeeded:
                     continue
 
-                commit_workspace_changes(config)
-                return LoopResult.success(FINISH_SUCCESS_MESSAGE, memory)
+                commit_workspace_changes(context)
+                return LoopResult.success(FINISH_SUCCESS_MESSAGE, context)
 
-            tool_result = run_tool(tool_call, config, memory)
+            tool_result = run_tool(tool_call, context)
             print_tool_call(iteration, tool_call, tool_result.note)
-            memory.append(
+            context.memory.append(
                 iteration,
                 tool_call,
                 tool_result.output,
                 skipped=tool_result.skipped,
             )
 
-        rollback_workspace_changes(config, MAX_ITERATIONS_REACHED_MESSAGE)
-        return LoopResult.max_iterations_reached(memory)
+        rollback_workspace_changes(context, MAX_ITERATIONS_REACHED_MESSAGE)
+        return LoopResult.max_iterations_reached(context)
     except Exception as exc:  # noqa: BLE001
-        rollback_workspace_changes(config, AGENTIC_LOOP_ERROR_MESSAGE)
-        return LoopResult.failure(exc, memory)
+        rollback_workspace_changes(context, AGENTIC_LOOP_ERROR_MESSAGE)
+        return LoopResult.failure(exc, context)
 
 
 def main() -> int:
     args = parse_args()
     start_time = perf_counter()
-    config: AgentConfig | None = None
+    context: Context | None = None
 
     try:
-        config = prepare_run(args.workspace_path)
-        loop_result = agentic_loop(config)
+        context = prepare_run(args.workspace_path)
+        loop_result = agentic_loop(context)
     except Exception as exc:  # noqa: BLE001
-        if config is not None:
-            rollback_workspace_changes(config)
+        if context is not None:
+            rollback_workspace_changes(context)
         elapsed_seconds = perf_counter() - start_time
         trace_error("prepare_run", str(exc), exc.__class__.__name__, [])
         trace_run_summary(elapsed_seconds, [])

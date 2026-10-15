@@ -3,13 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from ark.finish_handler import INVALID_FINISH_MESSAGE, apply_finish
-from ark.inputs import AgentConfig
+from ark.inputs import Context
 from ark.models import Model
 from ark.protocol import ToolCall
 
 
-def build_context(tmp_path: Path) -> AgentConfig:
-    return AgentConfig(
+def build_context(tmp_path: Path) -> Context:
+    return Context(
         model=Model(
             name="model",
             system_prompt="system",

@@ -3,14 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from ark import tools
-from ark.inputs import AgentConfig
-from ark.memory import Memory
+from ark.inputs import Context
 from ark.models import Model
 from ark.protocol import ToolCall
 
 
-def build_context(tmp_path: Path) -> AgentConfig:
-    return AgentConfig(
+def build_context(tmp_path: Path) -> Context:
+    return Context(
         model=Model(
             name="model",
             system_prompt="system",
@@ -42,13 +41,12 @@ def test_read_file_returns_file_contents(tmp_path: Path) -> None:
 
 
 def test_run_tool_skips_file_read_already_in_recent_context(tmp_path: Path) -> None:
-    memory = Memory()
-    memory.append(1, ToolCall("inspect", "read_file", "example.txt"), "hello")
+    context = build_context(tmp_path)
+    context.memory.append(1, ToolCall("inspect", "read_file", "example.txt"), "hello")
 
     result = tools.run_tool(
         ToolCall("inspect again", "read_file", "example.txt"),
-        build_context(tmp_path),
-        memory,
+        context,
     )
 
     assert result.output == (

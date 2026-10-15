@@ -129,12 +129,12 @@ finish -> run tests -> keep changes or continue/rollback
 
 The main modules are deliberately small and have distinct responsibilities:
 
-- `inputs.py` loads configuration and prompts, prepares `ark-workspace`, and manages workspace snapshots.
+- `inputs.py` loads configuration and prompts, prepares `ark-workspace`, and creates the execution `Context`.
 - `agentic_loop.py` coordinates model calls, tool execution, completion, and rollback.
 - `models.py` defines `Model`, which owns the model configuration and system prompt, reuses one OpenAI client throughout the run, sends requests, and normalizes responses and token usage.
 - `protocol.py` parses and validates the model's requested action.
 - `tools.py` implements workspace inspection, test execution, and approved edits.
-- `memory.py` builds the compact history sent with the next model request.
+- `memory.py` defines `Memory`, stored in `Context`, which builds the compact history sent with the next model request.
 - `finish_handler.py` validates completion and runs the final tests.
 - `traces.py` records the execution in `agent_trace.log`.
 

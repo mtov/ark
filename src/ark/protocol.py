@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 from .traces import trace_repair_attempt
 
 if TYPE_CHECKING:
-    from .inputs import AgentConfig
+    from .inputs import Context
 
 
 @dataclass
@@ -80,8 +80,8 @@ def parse_edit_file_request(text: str) -> EditFileRequest:
     )
 
 
-def repair_response(config: AgentConfig, user_message: str, reason: str) -> ToolCall:
+def repair_response(context: Context, user_message: str, reason: str) -> ToolCall:
     trace_repair_attempt("Protocol repair", reason)
     repair_message = f"{user_message}\n\n{REPAIR_PROMPT}"
-    response = config.model.call(repair_message)
+    response = context.model.call(repair_message)
     return parse_response(response.content)
