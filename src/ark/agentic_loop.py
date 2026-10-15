@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from time import perf_counter
 from typing import Literal
 
@@ -37,10 +37,8 @@ FINISH_WITHOUT_EDIT_MESSAGE = "Finish requires at least one approved edit_file a
 @dataclass
 class LoopResult:
     status: Literal["success", "max_iterations_reached", "failed"]
-    output: str | None = None
     error: str | None = None
     error_type: str | None = None
-    tools_called: list[str] = field(default_factory=list)
 
 
 def invoke_model(context: Context) -> ToolCall:
@@ -112,11 +110,7 @@ def agentic_loop(context: Context) -> LoopResult:
                     continue
 
                 commit_workspace_changes(context)
-                return LoopResult(
-                    status="success",
-                    output=FINISH_SUCCESS_MESSAGE,
-                    tools_called=context.memory.tools_called.copy(),
-                )
+                return LoopResult(status="success")
 
             tool_result = run_tool(tool_call, context)
             print_tool_call(iteration, tool_call, tool_result.note)
@@ -128,18 +122,13 @@ def agentic_loop(context: Context) -> LoopResult:
             )
 
         rollback_workspace_changes(context, MAX_ITERATIONS_REACHED_MESSAGE)
-        return LoopResult(
-            status="max_iterations_reached",
-            error=MAX_ITERATIONS_REACHED_MESSAGE,
-            tools_called=context.memory.tools_called.copy(),
-        )
+        return LoopResult(status="max_iterations_reached")
     except Exception as exc:  # noqa: BLE001
         rollback_workspace_changes(context, AGENTIC_LOOP_ERROR_MESSAGE)
         return LoopResult(
             status="failed",
             error=str(exc),
             error_type=exc.__class__.__name__,
-            tools_called=context.memory.tools_called.copy(),
         )
 
 
@@ -163,20 +152,22 @@ def main() -> int:
     elapsed_seconds = perf_counter() - start_time
 
     if loop_result.status != "success":
+        error_message = (
+            MAX_ITERATIONS_REACHED_MESSAGE
+            if loop_result.status == "max_iterations_reached"
+            else loop_result.error or "Unknown error."
+        )
         if loop_result.status == "failed":
             trace_error(
                 "agentic_loop",
-                loop_result.error or "Unknown error.",
+                error_message,
                 loop_result.error_type or "Exception",
-                loop_result.tools_called,
+                context.memory.tools_called,
             )
-        trace_run_summary(elapsed_seconds, loop_result.tools_called)
-        print_failure_summary(
-            loop_result.error or "Unknown error.",
-            elapsed_seconds,
-        )
+        trace_run_summary(elapsed_seconds, context.memory.tools_called)
+        print_failure_summary(error_message, elapsed_seconds)
         return 1
 
-    trace_run_summary(elapsed_seconds, loop_result.tools_called)
-    print_success_summary(loop_result.output or "", elapsed_seconds)
+    trace_run_summary(elapsed_seconds, context.memory.tools_called)
+    print_success_summary(FINISH_SUCCESS_MESSAGE, elapsed_seconds)
     return 0

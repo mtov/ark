@@ -1,12 +1,17 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
 
 from ark.agentic_loop import (
     FINISH_SUCCESS_MESSAGE,
     FINISH_WITHOUT_EDIT_MESSAGE,
+    LoopResult,
     MAX_ITERATIONS_REACHED_MESSAGE,
     agentic_loop,
+    main,
     try_finish,
     invoke_model,
 )
@@ -42,19 +47,41 @@ def tool_call_sequence(*tool_calls: ToolCall):
     return next_tool_call
 
 
-def test_loop_result_copies_tool_calls_from_memory(monkeypatch, tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    ("loop_result", "exit_code", "message"),
+    [
+        (LoopResult(status="success"), 0, FINISH_SUCCESS_MESSAGE),
+        (LoopResult(status="max_iterations_reached"), 1, MAX_ITERATIONS_REACHED_MESSAGE),
+    ],
+)
+def test_main_reports_tool_calls_from_context(
+    monkeypatch,
+    capsys,
+    tmp_path: Path,
+    loop_result: LoopResult,
+    exit_code: int,
+    message: str,
+) -> None:
     context = build_context(tmp_path)
     context.memory.record_tool_call("read_file")
+    context.memory.record_tool_call("finish")
+    summaries: list[list[str]] = []
     monkeypatch.setattr(
-        "ark.agentic_loop.invoke_model",
-        tool_call_sequence(ToolCall("done", "finish", "")),
+        "ark.agentic_loop.parse_args",
+        lambda: SimpleNamespace(workspace_path=str(tmp_path)),
     )
-    monkeypatch.setattr("ark.agentic_loop.try_finish", lambda *_args: True)
+    monkeypatch.setattr("ark.agentic_loop.prepare_run", lambda _path: context)
+    monkeypatch.setattr(
+        "ark.agentic_loop.agentic_loop", lambda _context: loop_result
+    )
+    monkeypatch.setattr(
+        "ark.agentic_loop.trace_run_summary",
+        lambda _elapsed, tools_called: summaries.append(tools_called.copy()),
+    )
 
-    result = agentic_loop(context)
-    context.memory.record_tool_call("run_tests")
-
-    assert result.tools_called == ["read_file", "finish"]
+    assert main() == exit_code
+    assert summaries == [["read_file", "finish"]]
+    assert message in capsys.readouterr().out
 
 
 def test_invoke_model_records_tool_call(monkeypatch, tmp_path: Path) -> None:
@@ -124,8 +151,7 @@ def test_finish_retries_after_failed_tests_without_resetting_workspace(monkeypat
     result = agentic_loop(context)
 
     assert result.status == "success"
-    assert result.output == FINISH_SUCCESS_MESSAGE
-    assert result.tools_called == ["finish", "run_tests", "finish", "run_tests"]
+    assert context.memory.tools_called == ["finish", "run_tests", "finish", "run_tests"]
     assert "1 failed" in seen_histories[1]
 
 
@@ -167,7 +193,7 @@ def test_approved_edit_is_kept_after_successful_finish(monkeypatch, tmp_path: Pa
     result = agentic_loop(context)
 
     assert result.status == "success"
-    assert result.tools_called == ["edit_file", "finish", "run_tests"]
+    assert context.memory.tools_called == ["edit_file", "finish", "run_tests"]
     assert file_path.read_text(encoding="utf-8") == "value = new\n"
     assert context.snapshot_path is None
 
@@ -196,12 +222,12 @@ def test_max_iterations_rolls_back_transaction(monkeypatch, tmp_path: Path) -> N
     result = agentic_loop(context)
 
     assert result.status == "max_iterations_reached"
-    assert result.error == MAX_ITERATIONS_REACHED_MESSAGE
+    assert result.error is None
     assert file_path.read_text(encoding="utf-8") == "old\n"
     assert context.snapshot_path is None
 
 
-def test_agentic_loop_returns_failure_with_tool_history(monkeypatch, tmp_path: Path) -> None:
+def test_agentic_loop_returns_failure(monkeypatch, tmp_path: Path) -> None:
     context = build_context(tmp_path)
     monkeypatch.setattr(
         "ark.agentic_loop.invoke_model",
@@ -213,4 +239,4 @@ def test_agentic_loop_returns_failure_with_tool_history(monkeypatch, tmp_path: P
     assert result.status == "failed"
     assert result.error == "missing content"
     assert result.error_type == "ValueError"
-    assert result.tools_called == []
+    assert context.memory.tools_called == []
