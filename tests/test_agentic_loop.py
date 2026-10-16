@@ -9,12 +9,12 @@ from ark.agentic_loop import (
     FINISH_SUCCESS_MESSAGE,
     FINISH_WITHOUT_EDIT_MESSAGE,
     INVALID_FINISH_MESSAGE,
-    LoopResult,
     MAX_ITERATIONS_REACHED_MESSAGE,
+    LoopResult,
     agentic_loop,
+    invoke_model,
     main,
     try_finish,
-    invoke_model,
 )
 from ark.inputs import Context
 from ark.memory import Memory

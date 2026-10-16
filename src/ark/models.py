@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from functools import cached_property
 import json
 import os
+from dataclasses import dataclass
+from functools import cached_property
 from typing import Any
 
 from .traces import record_response_usage
