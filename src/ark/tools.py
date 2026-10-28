@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -14,9 +15,11 @@ from .traces import trace_edit_event, trace_test_event
 
 
 MAX_FIND_TEXT_MATCHES = 20
-SKIPPED_DIRECTORIES = {".git", ".venv", "__pycache__"}
-TEST_COMMAND = (sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider")
-TEST_TIMEOUT_SECONDS = 30
+SKIPPED_DIRECTORIES = {".git", ".venv", "__pycache__", "target"}
+TEST_COMMANDS = {
+    "pytest": (sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"),
+    "maven": ("./mvnw", "test"),
+}
 
 
 @dataclass
@@ -119,19 +122,61 @@ def find_text(action_input: str, workspace_path: Path) -> str:
     return "\n".join(matches)
 
 
-def run_tests_with_status(workspace_path: Path) -> tuple[bool, str]:
+def get_test_command(context: Context) -> tuple[str, ...]:
+    if context.test_runner == "maven":
+        wrapper = context.workspace_path / "mvnw"
+        if not wrapper.is_file():
+            raise FileNotFoundError("Maven wrapper not found: expected mvnw in the workspace root.")
+        if not os.access(wrapper, os.X_OK):
+            raise PermissionError("Maven wrapper is not executable. Run chmod +x mvnw in the source workspace.")
+    return TEST_COMMANDS[context.test_runner]
+
+
+def _run_test_command(
+    command: tuple[str, ...], context: Context, environment: dict[str, str]
+) -> subprocess.CompletedProcess[str]:
+    with subprocess.Popen(
+        command,
+        cwd=context.workspace_path,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=environment,
+        start_new_session=os.name == "posix",
+    ) as process:
+        try:
+            stdout, stderr = process.communicate(timeout=context.test_timeout_seconds)
+        except subprocess.TimeoutExpired:
+            if os.name == "posix":
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            else:
+                process.kill()
+            stdout, stderr = process.communicate()
+            raise subprocess.TimeoutExpired(
+                command, context.test_timeout_seconds, output=stdout, stderr=stderr
+            ) from None
+    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+
+
+def _test_output(*streams: str | bytes | None) -> str:
+    parts = [stream.decode(errors="replace") if isinstance(stream, bytes) else stream for stream in streams]
+    return "\n".join(part.strip() for part in parts if part and part.strip())
+
+
+def run_tests_with_status(context: Context) -> tuple[bool, str]:
     environment = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
-    print("Running tests...", flush=True)
+    print(f"Running tests ({context.test_runner}, timeout: {context.test_timeout_seconds}s)...", flush=True)
 
     try:
-        result = subprocess.run(
-            TEST_COMMAND,
-            cwd=workspace_path,
-            capture_output=True,
-            text=True,
-            timeout=TEST_TIMEOUT_SECONDS,
-            env=environment,
-        )
+        command = get_test_command(context)
+        result = _run_test_command(command, context, environment)
+    except subprocess.TimeoutExpired as exc:
+        print("Tests: failed", flush=True)
+        message = f"Tests timed out after {context.test_timeout_seconds} seconds using {context.test_runner}."
+        return False, _test_output(message, exc.stdout, exc.stderr)
     except Exception as exc:  # noqa: BLE001
         print("Tests: failed", flush=True)
         return False, f"Could not run tests: {exc}"
@@ -139,7 +184,7 @@ def run_tests_with_status(workspace_path: Path) -> tuple[bool, str]:
     passed = result.returncode == 0
     print("Tests: passed" if passed else "Tests: failed", flush=True)
 
-    output = "\n".join(part for part in (result.stdout.strip(), result.stderr.strip()) if part).strip()
+    output = _test_output(result.stdout, result.stderr)
 
     if not output and passed:
         return True, "Tests passed."
@@ -149,8 +194,8 @@ def run_tests_with_status(workspace_path: Path) -> tuple[bool, str]:
     return passed, output
 
 
-def run_tests(workspace_path: Path) -> str:
-    passed, output = run_tests_with_status(workspace_path)
+def run_tests(context: Context) -> str:
+    passed, output = run_tests_with_status(context)
     trace_test_event("passed" if passed else "failed", None if passed else output)
     return output
 
@@ -239,7 +284,7 @@ def run_tool(
     if tool_call.name == "find_text":
         return ToolResult(find_text(tool_call.args, workspace_path))
     if tool_call.name == "run_tests":
-        return ToolResult(run_tests(workspace_path))
+        return ToolResult(run_tests(context))
     if tool_call.name == "edit_file":
         return ToolResult(edit_file(tool_call.args, context))
 

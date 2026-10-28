@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -84,7 +85,7 @@ def test_load_model_supports_openai(tmp_path: Path, monkeypatch) -> None:
 
     monkeypatch.setattr(inputs, "CONFIG_PATH", config_path)
 
-    model = inputs.load_model("system prompt")
+    model = inputs.load_model("system prompt", inputs.load_config())
 
     assert model.name == "local-model"
     assert model.system_prompt == "system prompt"
@@ -93,16 +94,34 @@ def test_load_model_supports_openai(tmp_path: Path, monkeypatch) -> None:
     assert model.timeout_seconds == 45
 
 
-def test_load_model_reports_invalid_json(tmp_path: Path, monkeypatch) -> None:
+def test_load_config_reports_invalid_json(tmp_path: Path, monkeypatch) -> None:
     config_path = tmp_path / "config.json"
     config_path.write_text("{invalid", encoding="utf-8")
     monkeypatch.setattr(inputs, "CONFIG_PATH", config_path)
 
     with pytest.raises(ValueError, match="contains invalid JSON"):
-        inputs.load_model("system prompt")
+        inputs.load_config()
 
 
-def test_prepare_run_keeps_agents_md_out_of_system_prompt(tmp_path: Path, monkeypatch) -> None:
+@pytest.mark.parametrize(
+    ("config_options", "overrides", "runner", "timeout"),
+    [
+        ({}, {}, "pytest", 30),
+        ({"test_runner": "maven"}, {}, "maven", 300),
+        ({"test_runner": "maven", "test_timeout_seconds": 180}, {}, "maven", 180),
+        (
+            {"test_runner": "pytest", "test_timeout_seconds": 180},
+            {"test_runner": "maven", "test_timeout": 600},
+            "maven", 600,
+        ),
+        ({"test_runner": "maven"}, {"test_runner": "pytest"}, "pytest", 30),
+        ({"test_runner": "maven"}, {"test_timeout": 600}, "maven", 600),
+        ({"test_timeout_seconds": 180}, {"test_runner": "maven"}, "maven", 180),
+    ],
+)
+def test_prepare_run_keeps_agents_md_out_of_system_prompt(
+    tmp_path: Path, monkeypatch, config_options, overrides, runner, timeout
+) -> None:
     source_workspace = tmp_path / "source"
     source_workspace.mkdir()
     (source_workspace / "prompt.txt").write_text("Fix the bug.", encoding="utf-8")
@@ -119,9 +138,10 @@ def test_prepare_run_keeps_agents_md_out_of_system_prompt(tmp_path: Path, monkey
         json.dumps(
             {
                 "openai_base_url": None,
-                "openai_model": "gpt-5.4-mini",
+                "openai_model": "gpt-6-luna",
                 "timeout_seconds": 30,
                 "openai_api_key_env": "OPENAI_API_KEY",
+                **config_options,
             }
         ),
         encoding="utf-8",
@@ -137,7 +157,7 @@ def test_prepare_run_keeps_agents_md_out_of_system_prompt(tmp_path: Path, monkey
     monkeypatch.setattr(inputs, "SYSTEM_PROMPT_PATH", system_prompt_path)
     monkeypatch.setattr(inputs, "trace_request", lambda prompt: traced_requests.append(prompt))
 
-    context = inputs.prepare_run(str(source_workspace))
+    context = inputs.prepare_run(str(source_workspace), **overrides)
 
     assert context.model.system_prompt == (
         "Base system prompt.\n\n"
@@ -150,3 +170,66 @@ def test_prepare_run_keeps_agents_md_out_of_system_prompt(tmp_path: Path, monkey
         "Always read the failing test before editing."
     )
     assert traced_requests == [context.user_prompt]
+    assert context.test_runner == runner
+    assert context.test_timeout_seconds == timeout
+    assert context.model.timeout_seconds == 30
+
+
+@pytest.mark.parametrize("runner", ["gradle", None, [], 1])
+def test_resolve_test_options_rejects_invalid_runner(runner) -> None:
+    with pytest.raises(ValueError, match="test_runner must be"):
+        inputs.resolve_test_options({"test_runner": runner})
+
+
+@pytest.mark.parametrize("timeout", [0, -1, True, "30", 0.5, None])
+def test_resolve_test_options_rejects_invalid_timeout(timeout) -> None:
+    with pytest.raises(ValueError, match="positive integer"):
+        inputs.resolve_test_options({"test_timeout_seconds": timeout})
+
+
+@pytest.mark.parametrize("config", [[], None, "config"])
+def test_load_config_requires_json_object(tmp_path: Path, monkeypatch, config) -> None:
+    config_path = tmp_path / "config.json"
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    monkeypatch.setattr(inputs, "CONFIG_PATH", config_path)
+    with pytest.raises(ValueError, match="JSON object"):
+        inputs.load_config()
+
+
+@pytest.mark.parametrize(
+    ("options", "runner", "timeout"),
+    [([], None, None), (["--test-runner", "maven", "--test-timeout", "600"], "maven", 600)],
+)
+def test_parse_args_accepts_test_options(monkeypatch, options, runner, timeout) -> None:
+    monkeypatch.setattr(sys, "argv", ["ark", "workspace", *options])
+    args = inputs.parse_args()
+    assert args.workspace_path == "workspace"
+    assert args.test_runner == runner
+    assert args.test_timeout == timeout
+
+
+@pytest.mark.parametrize(
+    "options",
+    [
+        ["--test-runner", "gradle"],
+        ["--test-timeout", "0"],
+        ["--test-timeout", "-1"],
+        ["--test-timeout", "1.5"],
+        ["--test-timeout", "abc"],
+    ],
+)
+def test_parse_args_rejects_invalid_test_options(monkeypatch, options) -> None:
+    monkeypatch.setattr(sys, "argv", ["ark", "workspace", *options])
+    with pytest.raises(SystemExit) as error:
+        inputs.parse_args()
+    assert error.value.code == 2
+
+
+def test_prepare_run_validates_options_before_copying_workspace(tmp_path: Path, monkeypatch) -> None:
+    copies = []
+    monkeypatch.setattr(inputs, "clear_trace", lambda: None)
+    monkeypatch.setattr(inputs, "load_config", lambda: {"test_runner": "gradle"})
+    monkeypatch.setattr(inputs, "prepare_runtime_workspace", lambda path: copies.append(path))
+    with pytest.raises(ValueError, match="test_runner must be"):
+        inputs.prepare_run(str(tmp_path))
+    assert copies == []

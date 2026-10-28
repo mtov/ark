@@ -6,6 +6,7 @@ import shutil
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from .cli_output import print_model_summary, print_user_prompt
 from .memory import Memory
@@ -20,6 +21,7 @@ SYSTEM_PROMPT_PATH = CONFIG_DIR / "system_prompt.txt"
 WORKSPACE_INSTRUCTIONS_FILE_NAME = "AGENTS.md"
 USER_PROMPT_FILE_NAME = "prompt.txt"
 IGNORED_WORKSPACE_NAMES = ("evaluation",)
+TEST_TIMEOUTS = {"pytest": 30, "maven": 300}
 
 
 @dataclass
@@ -27,6 +29,8 @@ class Context:
     model: Model
     user_prompt: str
     workspace_path: Path
+    test_runner: str = "pytest"
+    test_timeout_seconds: int = TEST_TIMEOUTS["pytest"]
     memory: Memory = field(default_factory=Memory)
     snapshot_path: Path | None = None
 
@@ -54,10 +58,22 @@ def _read_text_file(
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Ark")
     parser.add_argument("workspace_path", help="Path to the test workspace directory")
+    parser.add_argument("--test-runner", choices=TEST_TIMEOUTS, help="Test runner (default: config or pytest)")
+    parser.add_argument("--test-timeout", type=_positive_int, help="Timeout for each test run, in seconds")
     return parser.parse_args()
 
 
-def load_model(system_prompt: str) -> Model:
+def _positive_int(value: str) -> int:
+    try:
+        number = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("must be a positive integer") from exc
+    if number <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return number
+
+
+def load_config() -> dict[str, Any]:
     try:
         with CONFIG_PATH.open("r", encoding="utf-8") as file:
             raw_config = json.load(file)
@@ -68,12 +84,34 @@ def load_model(system_prompt: str) -> Model:
     except OSError as exc:
         raise OSError(f"Could not read config file: {CONFIG_PATH}") from exc
 
+    if not isinstance(raw_config, dict):
+        raise ValueError("Config file must contain a JSON object.")
+    return raw_config
+
+
+def resolve_test_options(
+    config: dict[str, Any], test_runner: str | None = None, test_timeout: int | None = None
+) -> tuple[str, int]:
+    runner = test_runner if test_runner is not None else config.get("test_runner", "pytest")
+    if not isinstance(runner, str) or runner not in TEST_TIMEOUTS:
+        raise ValueError("test_runner must be 'pytest' or 'maven'.")
+    timeout = (
+        test_timeout
+        if test_timeout is not None
+        else config.get("test_timeout_seconds", TEST_TIMEOUTS[runner])
+    )
+    if type(timeout) is not int or timeout <= 0:
+        raise ValueError("Test timeout must be a positive integer in seconds.")
+    return runner, timeout
+
+
+def load_model(system_prompt: str, config: dict[str, Any]) -> Model:
     return Model(
-        name=raw_config["openai_model"],
+        name=config["openai_model"],
         system_prompt=system_prompt,
-        timeout_seconds=raw_config["timeout_seconds"],
-        base_url=raw_config.get("openai_base_url"),
-        api_key_env=raw_config.get("openai_api_key_env"),
+        timeout_seconds=config["timeout_seconds"],
+        base_url=config.get("openai_base_url"),
+        api_key_env=config.get("openai_api_key_env"),
     )
 
 
@@ -181,12 +219,16 @@ def build_user_prompt(user_prompt: str, workspace_instructions: str | None = Non
     )
 
 
-def prepare_run(workspace_path_arg: str) -> Context:
+def prepare_run(
+    workspace_path_arg: str, *, test_runner: str | None = None, test_timeout: int | None = None
+) -> Context:
     clear_trace()
+    config = load_config()
+    runner, timeout = resolve_test_options(config, test_runner, test_timeout)
     source_workspace_path = resolve_workspace_path(workspace_path_arg)
     workspace_path = prepare_runtime_workspace(source_workspace_path)
     system_prompt = build_system_prompt(load_system_prompt(), workspace_path)
-    model = load_model(system_prompt)
+    model = load_model(system_prompt, config)
     print_model_summary(model)
     workspace_instructions = load_workspace_instructions(workspace_path)
     if workspace_instructions is not None:
@@ -194,4 +236,10 @@ def prepare_run(workspace_path_arg: str) -> Context:
     user_prompt = build_user_prompt(load_user_prompt(workspace_path), workspace_instructions)
     print_user_prompt(user_prompt)
     trace_request(user_prompt)
-    return Context(model=model, user_prompt=user_prompt, workspace_path=workspace_path)
+    return Context(
+        model=model,
+        user_prompt=user_prompt,
+        workspace_path=workspace_path,
+        test_runner=runner,
+        test_timeout_seconds=timeout,
+    )

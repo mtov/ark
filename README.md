@@ -24,7 +24,8 @@ Ark is intended for research, teaching, and small curated benchmarks. It is not 
 
 - Python 3.11 or newer.
 - An OpenAI API key or an OpenAI-compatible endpoint.
-- A task workspace containing a `prompt.txt` file, source code, and Pytest tests.
+- A task workspace containing a `prompt.txt` file, source code, and Pytest or Maven tests.
+- For Maven tasks: a compatible JDK and the project's executable `mvnw`, `pom.xml`, and `.mvn/` files. The `./mvnw` runner requires a POSIX shell, such as on macOS or Linux.
 
 ### Installation
 
@@ -36,7 +37,7 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
-Ark runs task tests with the same Python environment. Install any task-specific dependencies in this virtual environment as well.
+Ark runs Pytest tasks with the same Python environment. Install any task-specific Python dependencies in this virtual environment as well.
 
 ### Included test workspaces
 
@@ -57,9 +58,10 @@ Ark uses the OpenAI Python client. The default `config/config.json` is:
 ```json
 {
   "openai_base_url": null,
-  "openai_model": "gpt-5.4-mini",
+  "openai_model": "gpt-6-luna",
   "timeout_seconds": 600,
-  "openai_api_key_env": "OPENAI_API_KEY"
+  "openai_api_key_env": "OPENAI_API_KEY",
+  "test_runner": "pytest"
 }
 ```
 
@@ -102,11 +104,35 @@ my-task/
 - `AGENTS.md` is optional and adds task-specific instructions to the prompt.
 - `evaluation/` is intentionally excluded from the runtime copy, so private evaluation tests are not visible to the agent.
 
-Tests are always run from the workspace root with:
+### Test runners and timeouts
+
+Tests always run from the copied workspace root. Pytest is the default. Select Maven explicitly for a Java task:
 
 ```bash
-python -m pytest -q -p no:cacheprovider
+python run_ark.py ./python-task --test-runner pytest
+python run_ark.py ./java-task --test-runner maven
+python run_ark.py ./java-task --test-runner maven --test-timeout 600
 ```
+
+| Runner | Fixed command | Default timeout per test run |
+| --- | --- | --- |
+| `pytest` | `python -m pytest -q -p no:cacheprovider` using Ark's Python interpreter | 30 seconds |
+| `maven` | `./mvnw test` | 300 seconds |
+
+`--test-timeout` must be a positive integer in seconds. Both the `run_tests` action and the final tests requested by `finish` use the selected runner and timeout.
+
+You can set `test_runner` in `config/config.json` and optionally add `test_timeout_seconds`, for example:
+
+```json
+"test_runner": "maven",
+"test_timeout_seconds": 180
+```
+
+Runner selection follows: command-line flag, then configuration, then `pytest`. Timeout selection follows: command-line flag, then `test_timeout_seconds`, then the default for the selected runner. Omit `test_timeout_seconds` to retain the separate Pytest and Maven defaults. The existing `timeout_seconds` setting only controls model requests.
+
+Ark reports a missing or non-executable Maven wrapper without falling back to Pytest. Make `mvnw` executable in the original task directory before running Ark; the workspace copy preserves its permissions. The [Maven Wrapper](https://maven.apache.org/tools/wrapper/) may download Maven on its first invocation, and the build may download dependencies; this time counts toward the test timeout.
+
+A timeout is reported as a test failure with the available partial output. On macOS and Linux, Ark stops the test process group, including test subprocesses. A timed-out `finish` leaves the edits in place so the agent can continue. Searches skip Maven's generated `target/` directories.
 
 ## 3. Architecture
 
@@ -156,7 +182,7 @@ The available actions are:
 | `list_files` | Relative directory, or blank for `.` | List workspace entries. |
 | `read_file` | Relative file path | Read a UTF-8 file. |
 | `find_text` | `search text \| directory` | Search files below a directory. |
-| `run_tests` | Blank | Run the fixed Pytest command. |
+| `run_tests` | Blank | Run the selected fixed Pytest or Maven command. |
 | `edit_file` | `path`, `old`, and `new` blocks | Propose one exact replacement. |
 | `finish` | Blank | Request final validation. |
 
@@ -200,4 +226,4 @@ The trace is intended to make agent behavior reproducible and easy to analyze. I
 
 ## Limits
 
-Ark constrains its own file paths and test command, but task tests still execute as local Python processes. Run only trusted task workspaces. Ark is best suited to small tasks whose changes can be expressed as exact replacements in existing files.
+Ark constrains its own file paths and test commands, but task tests and Maven builds still execute as local processes. Run only trusted task workspaces. Ark is best suited to small tasks whose changes can be expressed as exact replacements in existing files.

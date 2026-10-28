@@ -72,7 +72,7 @@ def try_finish(
         context.memory.append(iteration, tool_call, INVALID_FINISH_MESSAGE)
         return False
 
-    tests_succeeded, test_output = run_tests_with_status(context.workspace_path)
+    tests_succeeded, test_output = run_tests_with_status(context)
     if tests_succeeded:
         trace_finish_event("completed", "finish")
     else:
@@ -119,7 +119,9 @@ def main() -> int:
     context: Context | None = None
 
     try:
-        context = prepare_run(args.workspace_path)
+        context = prepare_run(
+            args.workspace_path, test_runner=args.test_runner, test_timeout=args.test_timeout
+        )
         loop_result = agentic_loop(context)
     except Exception as exc:  # noqa: BLE001
         if context is not None:

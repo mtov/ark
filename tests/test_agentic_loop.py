@@ -68,9 +68,15 @@ def test_main_reports_tool_calls_from_context(
     summaries: list[list[str]] = []
     monkeypatch.setattr(
         "ark.agentic_loop.parse_args",
-        lambda: SimpleNamespace(workspace_path=str(tmp_path)),
+        lambda: SimpleNamespace(workspace_path=str(tmp_path), test_runner="maven", test_timeout=600),
     )
-    monkeypatch.setattr("ark.agentic_loop.prepare_run", lambda _path: context)
+    prepared = []
+
+    def prepare_run(path: str, **options) -> Context:
+        prepared.append((path, options))
+        return context
+
+    monkeypatch.setattr("ark.agentic_loop.prepare_run", prepare_run)
     monkeypatch.setattr("ark.agentic_loop.agentic_loop", lambda _context: loop_result)
     monkeypatch.setattr(
         "ark.agentic_loop.trace_run_summary",
@@ -78,6 +84,7 @@ def test_main_reports_tool_calls_from_context(
     )
 
     assert main() == exit_code
+    assert prepared == [(str(tmp_path), {"test_runner": "maven", "test_timeout": 600})]
     assert summaries == [["read_file", "finish"]]
     assert message in capsys.readouterr().out
 
@@ -138,7 +145,7 @@ def test_finish_retries_after_failed_tests_without_resetting_workspace(monkeypat
 
     test_results = iter([(False, "1 failed"), (True, "3 passed")])
     monkeypatch.setattr("ark.agentic_loop.invoke_model", next_tool_call)
-    monkeypatch.setattr("ark.agentic_loop.run_tests_with_status", lambda _path: next(test_results))
+    monkeypatch.setattr("ark.agentic_loop.run_tests_with_status", lambda _context: next(test_results))
     monkeypatch.setattr(Memory, "has_successful_edit", lambda _memory: True)
 
     result = agentic_loop(context)
@@ -151,10 +158,10 @@ def test_finish_retries_after_failed_tests_without_resetting_workspace(monkeypat
 def test_finish_requires_an_approved_edit(monkeypatch, tmp_path: Path) -> None:
     context = build_context(tmp_path)
     finish_call = ToolCall("done", "finish", "")
-    test_calls: list[Path] = []
+    test_calls: list[Context] = []
     monkeypatch.setattr(
         "ark.agentic_loop.run_tests_with_status",
-        lambda path: test_calls.append(path),
+        lambda context: test_calls.append(context),
     )
 
     result = try_finish(context, 1, finish_call)
@@ -164,13 +171,16 @@ def test_finish_requires_an_approved_edit(monkeypatch, tmp_path: Path) -> None:
     assert context.memory.entries[-1].result == FINISH_WITHOUT_EDIT_MESSAGE
 
 
-def test_finish_runs_final_tests(monkeypatch, tmp_path: Path) -> None:
+@pytest.mark.parametrize(("runner", "timeout"), [("pytest", 30), ("maven", 600)])
+def test_finish_runs_final_tests(monkeypatch, tmp_path: Path, runner, timeout) -> None:
     context = build_context(tmp_path)
-    test_calls: list[Path] = []
+    context.test_runner = runner
+    context.test_timeout_seconds = timeout
+    test_calls: list[Context] = []
     events: list[tuple] = []
 
-    def run_tests(path: Path) -> tuple[bool, str]:
-        test_calls.append(path)
+    def run_tests(context: Context) -> tuple[bool, str]:
+        test_calls.append(context)
         return True, "3 passed"
 
     monkeypatch.setattr(Memory, "has_successful_edit", lambda _memory: True)
@@ -178,33 +188,34 @@ def test_finish_runs_final_tests(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr("ark.agentic_loop.trace_finish_event", lambda *args: events.append(args))
 
     assert try_finish(context, 1, ToolCall("done", "finish", "")) is True
-    assert test_calls == [tmp_path]
+    assert test_calls == [context]
     assert context.memory.tools_called == ["run_tests"]
     assert events == [("completed", "finish")]
 
 
-def test_finish_returns_failed_tests_without_reverting_edits(monkeypatch, tmp_path: Path) -> None:
+@pytest.mark.parametrize("test_output", ["1 failed", "Tests timed out after 300 seconds using maven."])
+def test_finish_returns_failed_tests_without_reverting_edits(monkeypatch, tmp_path: Path, test_output) -> None:
     context = build_context(tmp_path)
     file_path = tmp_path / "example.py"
     file_path.write_text("approved edit\n", encoding="utf-8")
     events: list[tuple] = []
     monkeypatch.setattr(Memory, "has_successful_edit", lambda _memory: True)
-    monkeypatch.setattr("ark.agentic_loop.run_tests_with_status", lambda _path: (False, "1 failed"))
+    monkeypatch.setattr("ark.agentic_loop.run_tests_with_status", lambda _context: (False, test_output))
     monkeypatch.setattr("ark.agentic_loop.trace_finish_event", lambda *args: events.append(args))
 
     assert try_finish(context, 1, ToolCall("done", "finish", "")) is False
-    assert context.memory.entries[-1].result == "1 failed"
+    assert context.memory.entries[-1].result == test_output
     assert context.memory.tools_called == ["run_tests"]
     assert file_path.read_text(encoding="utf-8") == "approved edit\n"
-    assert events == [("failed", "post_apply_tests", "1 failed")]
+    assert events == [("failed", "post_apply_tests", test_output)]
 
 
 def test_finish_rejects_nonempty_input(monkeypatch, tmp_path: Path) -> None:
     context = build_context(tmp_path)
-    test_calls: list[Path] = []
+    test_calls: list[Context] = []
     events: list[tuple] = []
     monkeypatch.setattr(Memory, "has_successful_edit", lambda _memory: True)
-    monkeypatch.setattr("ark.agentic_loop.run_tests_with_status", lambda path: test_calls.append(path))
+    monkeypatch.setattr("ark.agentic_loop.run_tests_with_status", lambda context: test_calls.append(context))
     monkeypatch.setattr("ark.agentic_loop.trace_finish_event", lambda *args: events.append(args))
 
     assert try_finish(context, 1, ToolCall("done", "finish", "patch")) is False
@@ -228,7 +239,7 @@ def test_approved_edit_is_kept_after_successful_finish(monkeypatch, tmp_path: Pa
     ])
     monkeypatch.setattr("builtins.input", lambda _prompt: "y")
     monkeypatch.setattr("ark.agentic_loop.invoke_model", tool_call_sequence(*responses))
-    monkeypatch.setattr("ark.agentic_loop.run_tests_with_status", lambda _path: (True, "3 passed"))
+    monkeypatch.setattr("ark.agentic_loop.run_tests_with_status", lambda _context: (True, "3 passed"))
 
     result = agentic_loop(context)
 

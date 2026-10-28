@@ -1,6 +1,7 @@
 {
   "openai_base_url": null,
-  "openai_model": "gpt-5.4-mini",
+  "openai_model": "gpt-6-luna",
   "timeout_seconds": 600,
-  "openai_api_key_env": "OPENAI_API_KEY"
+  "openai_api_key_env": "OPENAI_API_KEY",
+  "test_runner": "pytest"
 }
