@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from pathlib import Path
 
-from .protocol import ToolCall
+from .guards import resolve_tool_path
+from .protocol import ToolCall, parse_read_file_request
 
 MAX_HISTORY_ENTRIES = 4
 MAX_OBSERVATION_CHARS = 8000
+MAX_RETAINED_READS = 3
 
 
 @dataclass
@@ -14,6 +17,7 @@ class MemoryEntry:
     tool_call: ToolCall
     result: str
     skipped: bool = False
+    file_path: Path | None = None
 
 
 @dataclass
@@ -28,8 +32,9 @@ class Memory:
         result: str,
         *,
         skipped: bool = False,
+        file_path: Path | None = None,
     ) -> None:
-        self.entries.append(MemoryEntry(iteration, tool_call, result, skipped))
+        self.entries.append(MemoryEntry(iteration, tool_call, result, skipped, file_path))
 
     def record_tool_call(self, name: str) -> None:
         self.tools_called.append(name)
@@ -44,24 +49,42 @@ class Memory:
             for entry in self.entries
         )
 
-    def has_current_file_read(self, path: str) -> bool:
-        normalized_path = path.strip()
+    def _current_reads(self) -> list[MemoryEntry]:
+        invalidated: set[Path] = set()
+        seen: set[tuple[Path, int, int | None]] = set()
+        reads = []
+        for entry in reversed(self.entries):
+            if entry.tool_call.name == "edit_file" and entry.file_path is not None:
+                invalidated.add(entry.file_path)
+            if entry.tool_call.name != "read_file" or entry.skipped or entry.file_path is None:
+                continue
+            if entry.file_path in invalidated:
+                continue
+            request = parse_read_file_request(entry.tool_call.args)
+            key = (entry.file_path, request.start, request.end)
+            if key not in seen:
+                reads.append(entry)
+                seen.add(key)
+        return reads
 
-        for entry in reversed(self.entries[-MAX_HISTORY_ENTRIES:]):
-            if (
-                not entry.skipped
-                and entry.tool_call.name == "read_file"
-                and entry.tool_call.args.strip() == normalized_path
-            ):
-                return True
+    def _context_entries(self) -> list[MemoryEntry]:
+        recent = self.entries[-MAX_HISTORY_ENTRIES:]
+        recent_ids = {id(entry) for entry in recent}
+        retained = [entry for entry in self._current_reads() if id(entry) not in recent_ids]
+        return sorted(retained[:MAX_RETAINED_READS] + recent, key=lambda entry: entry.iteration)
 
-            if (
-                entry.tool_call.name == "edit_file"
-                and entry.result.startswith("Edit applied successfully to ")
-                and entry.tool_call.edit_path() == normalized_path
-            ):
-                return False
-
+    def has_current_file_read(self, action_input: str, workspace_path: Path) -> bool:
+        try:
+            request = parse_read_file_request(action_input)
+            path = resolve_tool_path(request.path, workspace_path)
+        except ValueError:
+            return False
+        visible_ids = {id(entry) for entry in self._context_entries()}
+        for entry in self._current_reads():
+            previous = parse_read_file_request(entry.tool_call.args)
+            if id(entry) in visible_ids and entry.file_path == path:
+                if (previous.start, previous.end) == (request.start, request.end):
+                    return True
         return False
 
     def unique_args_for(self, name: str) -> list[str]:
@@ -70,6 +93,8 @@ class Memory:
 
         for entry in self.entries:
             if entry.tool_call.name != name:
+                continue
+            if name == "read_file" and entry.file_path is None:
                 continue
             value = entry.tool_call.args.strip()
             if not value or value in seen:
@@ -104,9 +129,13 @@ class Memory:
             sections.append("Searches already run:\n" + "\n".join(f"- {query}" for query in find_queries))
         if self.contains_tool("run_tests"):
             sections.append("Tests already run: yes")
+        current_read_ids = {id(entry) for entry in self._current_reads()}
         formatted_entries = []
-        for entry in self.entries[-MAX_HISTORY_ENTRIES:]:
+        for entry in self._context_entries():
             result = entry.result.strip()
+            if entry.tool_call.name == "read_file" and entry.file_path is not None:
+                if id(entry) not in current_read_ids:
+                    result = "File contents superseded by a later read or invalidated by an approved edit."
             if len(result) > MAX_OBSERVATION_CHARS:
                 result = f"{result[:MAX_OBSERVATION_CHARS].rstrip()}..."
             formatted_entries.append(
@@ -115,5 +144,5 @@ class Memory:
                 f"Tool Args: {self._context_args(entry.tool_call)}\n"
                 f"Observation: {result}\n"
             )
-        sections.append("Recent steps:\n" + "\n".join(formatted_entries))
+        sections.append("Recent steps and retained reads:\n" + "\n".join(formatted_entries))
         return "\n\n".join(sections)

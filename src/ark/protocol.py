@@ -29,6 +29,30 @@ class EditFileRequest:
     old: str
     new: str
 
+
+@dataclass(frozen=True)
+class ReadFileRequest:
+    path: str
+    start: int = 1
+    end: int | None = None
+
+
+def parse_read_file_request(text: str) -> ReadFileRequest:
+    path, separator, interval = text.strip().partition("|")
+    path = path.strip()
+    if not path:
+        raise ValueError("read_file requires a file path.")
+    if not separator:
+        return ReadFileRequest(path)
+    match = re.fullmatch(r"\s*(\d+):(\d+)\s*", interval)
+    if match is None:
+        raise ValueError("Invalid read_file range. Use: path | start:end (inclusive, starting at 1).")
+    start, end = map(int, match.groups())
+    if start < 1 or end < start:
+        raise ValueError("read_file requires 1 <= start <= end.")
+    return ReadFileRequest(path, start, end)
+
+
 REPAIR_PROMPT = (
     "Your previous response was invalid. "
     "Respond using only: "

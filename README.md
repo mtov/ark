@@ -61,7 +61,8 @@ Ark uses the OpenAI Python client. The default `config/config.json` is:
   "openai_model": "gpt-6-luna",
   "timeout_seconds": 600,
   "openai_api_key_env": "OPENAI_API_KEY",
-  "test_runner": "pytest"
+  "test_runner": "pytest",
+  "max_iterations": 20
 }
 ```
 
@@ -134,6 +135,16 @@ Ark reports a missing or non-executable Maven wrapper without falling back to Py
 
 A timeout is reported as a test failure with the available partial output. On macOS and Linux, Ark stops the test process group, including test subprocesses. A timed-out `finish` leaves the edits in place so the agent can continue. Searches skip Maven's generated `target/` directories.
 
+### Iteration limit
+
+Ark allows 20 model-requested actions per run by default. Set `max_iterations` in `config/config.json`, or override it for a run:
+
+```bash
+python run_ark.py ./java-task --test-runner maven --max-iterations 40
+```
+
+The limit must be a positive integer. The flag takes precedence over configuration; configurations without this field still default to 20. Reaching the limit stops the agent and rolls back approved edits.
+
 ## 3. Architecture
 
 At a high level, one run follows this flow:
@@ -179,14 +190,18 @@ The available actions are:
 
 | Action | Input | Purpose |
 | --- | --- | --- |
-| `list_files` | Relative directory, or blank for `.` | List workspace entries. |
-| `read_file` | Relative file path | Read a UTF-8 file. |
+| `list_files` | Relative directory, or blank for `.` | List recursive paths relative to the workspace root. |
+| `read_file` | File path, optionally followed by `\| start:end` | Read numbered UTF-8 lines; ranges are inclusive and start at 1. |
 | `find_text` | `search text \| directory` | Search files below a directory. |
 | `run_tests` | Blank | Run the selected fixed Pytest or Maven command. |
 | `edit_file` | `path`, `old`, and `new` blocks | Propose one exact replacement. |
 | `finish` | Blank | Request final validation. |
 
-All tool paths are restricted to `ark-workspace`. A repeated `read_file` request is skipped while the earlier result is still present in the recent context. An approved edit to that file invalidates the earlier read and allows the updated contents to be loaded.
+All tool paths are restricted to `ark-workspace`. Recursive listings omit `.git`, `.venv`, `__pycache__`, and `target`, do not descend into directory symlinks, and omit symlinks pointing outside the workspace. Listings stop at 100 entries or the observation size limit and include an explicit truncation notice. List a relevant subdirectory or use `find_text` to narrow exploration.
+
+`read_file` accepts a plain path or a range such as `src/test/java/StoreIntegrationTest.java | 70:110`. The output contains a workspace-relative path, the displayed line range, and numbered source lines. Line numbers are labels, not part of the source code used in edits. Long reads stay within the 8,000-character observation budget and include the next range to request. A single line too large to fit is reported explicitly rather than silently cut.
+
+A repeated read of the same range is skipped while its current contents remain in context, including retained reads. Other ranges can be read immediately. Failed reads are not cached. An approved edit invalidates every earlier range for that file, including reads through equivalent relative or absolute paths. Re-reading is allowed when contents have been edited or evicted from context.
 
 ## Edits and approval
 
@@ -208,11 +223,11 @@ def subtotal(items):
 
 Before requesting approval, Ark checks that the path is inside the runtime workspace, the file exists, `old` occurs exactly once, and `new` is different. This version edits existing files only; it does not create or delete files.
 
-The first approved edit creates a temporary snapshot. A successful `finish` keeps the runtime changes and discards the snapshot. Reaching the 20-iteration limit or encountering an unexpected loop error restores the runtime workspace from that snapshot.
+The first approved edit creates a temporary snapshot. A successful `finish` keeps the runtime changes and discards the snapshot. Reaching the configured iteration limit (20 by default) or encountering an unexpected loop error restores the runtime workspace from that snapshot.
 
 ## Memory and trace
 
-Each model request receives a compact summary rather than the entire raw conversation. Memory includes files already read, searches already made, whether tests have run, and the four most recent steps. Each observation is limited to 8,000 characters, and large `edit_file` inputs are represented only by their target path.
+Each model request receives a compact summary rather than the entire raw conversation. Memory includes files already read, searches already made, whether tests have run, and the four most recent steps. Up to three additional successful read observations are retained so navigation does not immediately evict relevant code. Read observations are not duplicated, and file contents invalidated by an approved edit are not sent again. Each observation is limited to 8,000 characters, and large `edit_file` inputs are represented only by their target path.
 
 `agent_trace.log` is cleared at the beginning of each run and records:
 
@@ -221,6 +236,7 @@ Each model request receives a compact summary rather than the entire raw convers
 - Test and finish results.
 - Protocol validation and repair attempts.
 - Errors, rollback events, elapsed time, token usage, and tool counts.
+- A final run status: `success`, `max_iterations_reached`, or `failed`.
 
 The trace is intended to make agent behavior reproducible and easy to analyze. It is excluded from Git.
 

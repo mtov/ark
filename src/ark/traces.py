@@ -138,10 +138,11 @@ def _format_tool_counts(tools_called: list[str]) -> str:
     return ", ".join(f"{tool}={count}" for tool, count in Counter(tools_called).items())
 
 
-def trace_run_summary(elapsed_seconds: float, tools_called: list[str]) -> None:
+def trace_run_summary(elapsed_seconds: float, tools_called: list[str], status: str) -> None:
     _append_event(
         "run_summary",
         [
+            f"status: {status}",
             f"total_tokens: {get_total_tokens()}",
             f"elapsed_seconds: {elapsed_seconds:.2f}",
             f"tool_counts: {_format_tool_counts(tools_called)}",

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -9,7 +10,8 @@ from pathlib import Path
 import pytest
 
 from ark import tools
-from ark.inputs import Context
+from ark.inputs import Context, commit_workspace_changes
+from ark.memory import MAX_HISTORY_ENTRIES, MAX_OBSERVATION_CHARS
 from ark.models import Model
 from ark.protocol import ToolCall
 
@@ -40,14 +42,159 @@ def test_read_file_returns_file_contents(tmp_path: Path) -> None:
     file_path = tmp_path / "example.txt"
     file_path.write_text("hello", encoding="utf-8")
 
-    content = tools.read_file("example.txt", tmp_path)
+    result = tools.read_file("example.txt", tmp_path)
 
-    assert content == "hello"
+    assert result.output == "File: example.txt\nLines: 1-1 of 1\n1: hello"
+    assert result.file_path == file_path.resolve()
+
+
+def test_list_files_returns_recursive_relative_paths(tmp_path: Path) -> None:
+    source = tmp_path / "src" / "main" / "java" / "OrderService.java"
+    source.parent.mkdir(parents=True)
+    source.write_text("class OrderService {}", encoding="utf-8")
+    for name in (".git", ".venv", "__pycache__", "target"):
+        ignored = tmp_path / name
+        ignored.mkdir()
+        (ignored / "hidden.txt").write_text("hidden", encoding="utf-8")
+
+    output = tools.list_files(".", tmp_path)
+
+    assert "src/main/java/OrderService.java" in output.splitlines()
+    assert "src/main/java/" in output.splitlines()
+    assert "hidden.txt" not in output
+    assert str(tmp_path) not in output
+    assert tools.list_files("src/main", tmp_path).endswith("src/main/java/OrderService.java")
+
+
+def test_list_files_reports_truncation_at_entry_limit(tmp_path: Path) -> None:
+    for index in range(tools.MAX_LIST_ENTRIES + 1):
+        (tmp_path / f"file_{index:03}.txt").touch()
+
+    output = tools.list_files(".", tmp_path)
+
+    assert len(output.splitlines()) == tools.MAX_LIST_ENTRIES + 1
+    assert output.splitlines()[0] == "file_000.txt"
+    assert "Listing truncated" in output.splitlines()[-1]
+    assert "subdirectory" in output.splitlines()[-1]
+
+
+def test_list_files_keeps_truncation_notice_inside_memory_budget(tmp_path: Path) -> None:
+    for index in range(100):
+        (tmp_path / (f"{index:03}_" + "x" * 150)).touch()
+
+    output = tools.list_files(".", tmp_path)
+
+    assert len(output) <= MAX_OBSERVATION_CHARS
+    assert output.endswith("Use list_files on a subdirectory shown above.")
+
+
+def test_listing_and_search_do_not_follow_external_symlinks(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    outside = tmp_path / "outside.txt"
+    outside.write_text("needle", encoding="utf-8")
+    (workspace / "outside-link.txt").symlink_to(outside)
+    (workspace / "loop").symlink_to(workspace, target_is_directory=True)
+
+    assert "outside-link" not in tools.list_files(".", workspace)
+    assert "No matches found" in tools.find_text("needle | .", workspace)
+    assert tools.read_file("outside-link.txt", workspace).file_path is None
+
+
+def test_read_file_returns_inclusive_line_range(tmp_path: Path) -> None:
+    (tmp_path / "source.txt").write_text("first\nsecond\nthird\nfourth\n", encoding="utf-8")
+
+    result = tools.read_file("source.txt | 2:3", tmp_path)
+
+    assert result.output == "File: source.txt\nLines: 2-3 of 4\n2: second\n3: third"
+    assert result.file_path == (tmp_path / "source.txt").resolve()
+    assert "4: fourth" in tools.read_file("source.txt | 3:100", tmp_path).output
+
+
+@pytest.mark.parametrize("action_input", ["", "source.txt | 0:2", "source.txt | 3:2", "source.txt | 1:",
+                                       "source.txt | -1:2", "source.txt | abc", "../outside.txt"])
+def test_read_file_rejects_invalid_requests(tmp_path: Path, action_input: str) -> None:
+    (tmp_path / "source.txt").write_text("contents", encoding="utf-8")
+    assert tools.read_file(action_input, tmp_path).file_path is None
+
+
+def test_read_file_handles_empty_files_and_out_of_bounds_ranges(tmp_path: Path) -> None:
+    (tmp_path / "empty.txt").touch()
+    assert "empty" in tools.read_file("empty.txt", tmp_path).output
+    (tmp_path / "source.txt").write_text("one line", encoding="utf-8")
+    result = tools.read_file("source.txt | 2:5", tmp_path)
+    assert result.file_path is None
+    assert "exceeds file length" in result.output
+
+
+def test_long_file_can_be_read_completely_using_continuations(tmp_path: Path) -> None:
+    lines = [f"content {number}: " + "x" * 90 for number in range(300)]
+    (tmp_path / "long.txt").write_text("\n".join(lines), encoding="utf-8")
+    context = build_context(tmp_path)
+    action_input = "long.txt"
+    recovered = []
+    for iteration in range(1, 20):
+        call = ToolCall("read", "read_file", action_input)
+        result = tools.run_tool(call, context)
+        assert result.skipped is False
+        assert len(result.output) <= MAX_OBSERVATION_CHARS
+        recovered.extend(re.findall(r"^\d+: (.*)$", result.output, flags=re.MULTILINE))
+        context.memory.append(iteration, call, result.output, file_path=result.file_path)
+        if "Read truncated." not in result.output:
+            break
+        continuation = result.output.splitlines()[-1]
+        assert continuation in context.memory.to_text()
+        action_input = continuation.split("Continue with read_file: ", 1)[1]
+    assert recovered == lines
+
+
+def test_oversized_single_line_is_reported_without_caching(tmp_path: Path) -> None:
+    (tmp_path / "long.txt").write_text("x" * (MAX_OBSERVATION_CHARS + 1), encoding="utf-8")
+    result = tools.read_file("long.txt", tmp_path)
+    assert result.file_path is None
+    assert "Line 1 is too long" in result.output
+    assert len(result.output) <= MAX_OBSERVATION_CHARS
+
+
+def test_failed_read_does_not_block_retry(tmp_path: Path) -> None:
+    context = build_context(tmp_path)
+    call = ToolCall("read", "read_file", "missing.txt")
+    failed = tools.run_tool(call, context)
+    context.memory.append(1, call, failed.output, file_path=failed.file_path)
+    (tmp_path / "missing.txt").write_text("now available", encoding="utf-8")
+    result = tools.run_tool(call, context)
+    assert result.skipped is False
+    assert "now available" in result.output
+
+
+def test_edit_invalidates_all_retained_ranges_and_path_aliases(monkeypatch, tmp_path: Path) -> None:
+    source = tmp_path / "source.txt"
+    source.write_text("old\nsecond line\n", encoding="utf-8")
+    context = build_context(tmp_path)
+    for iteration, action_input in enumerate(["./source.txt | 1:1", f"{source} | 2:2"], start=1):
+        call = ToolCall("read", "read_file", action_input)
+        result = tools.run_tool(call, context)
+        context.memory.append(iteration, call, result.output, file_path=result.file_path)
+    for iteration in range(3, MAX_HISTORY_ENTRIES + 4):
+        context.memory.append(iteration, ToolCall("list", "list_files", "."), "files")
+    assert "1: old" in context.memory.to_text()
+    assert tools.run_tool(ToolCall("read", "read_file", "source.txt | 1:1"), context).skipped is True
+    monkeypatch.setattr("builtins.input", lambda _prompt: "y")
+    edit = ToolCall("edit", "edit_file", "path: source.txt\nold:\n```\nold\n```\nnew:\n```\nnew\n```")
+    result = tools.run_tool(edit, context)
+    context.memory.append(8, edit, result.output, file_path=result.file_path)
+    assert "1: old" not in context.memory.to_text()
+    for action_input in ["./source.txt | 1:1", f"{source} | 2:2"]:
+        assert tools.run_tool(ToolCall("read", "read_file", action_input), context).skipped is False
+    assert "1: new" in tools.run_tool(ToolCall("read", "read_file", "source.txt | 1:1"), context).output
+    commit_workspace_changes(context)
 
 
 def test_run_tool_skips_file_read_already_in_recent_context(tmp_path: Path) -> None:
     context = build_context(tmp_path)
-    context.memory.append(1, ToolCall("inspect", "read_file", "example.txt"), "hello")
+    context.memory.append(
+        1, ToolCall("inspect", "read_file", "example.txt"), "hello", file_path=tmp_path / "example.txt"
+    )
 
     result = tools.run_tool(ToolCall("inspect again", "read_file", "example.txt"), context)
 

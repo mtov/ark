@@ -28,7 +28,6 @@ from .traces import (
 
 MAX_ITERATIONS_REACHED_MESSAGE = "Agent stopped after reaching the maximum number of steps."
 AGENTIC_LOOP_ERROR_MESSAGE = "agentic loop error"
-MAX_ITERATIONS = 20
 FINISH_SUCCESS_MESSAGE = "Changes applied and final tests passed."
 FINISH_WITHOUT_EDIT_MESSAGE = "Finish requires at least one approved edit_file action."
 INVALID_FINISH_MESSAGE = "Finish action must have an empty Action Input."
@@ -87,7 +86,7 @@ def try_finish(
 
 def agentic_loop(context: Context) -> LoopResult:
     try:
-        for iteration in range(1, MAX_ITERATIONS + 1):
+        for iteration in range(1, context.max_iterations + 1):
             tool_call = invoke_model(context)
 
             if tool_call.name == "finish":
@@ -104,6 +103,7 @@ def agentic_loop(context: Context) -> LoopResult:
                 tool_call,
                 tool_result.output,
                 skipped=tool_result.skipped,
+                file_path=tool_result.file_path,
             )
 
         rollback_workspace_changes(context, MAX_ITERATIONS_REACHED_MESSAGE)
@@ -120,7 +120,10 @@ def main() -> int:
 
     try:
         context = prepare_run(
-            args.workspace_path, test_runner=args.test_runner, test_timeout=args.test_timeout
+            args.workspace_path,
+            test_runner=args.test_runner,
+            test_timeout=args.test_timeout,
+            max_iterations=args.max_iterations,
         )
         loop_result = agentic_loop(context)
     except Exception as exc:  # noqa: BLE001
@@ -128,7 +131,7 @@ def main() -> int:
             rollback_workspace_changes(context)
         elapsed_seconds = perf_counter() - start_time
         trace_error("prepare_run", str(exc), exc.__class__.__name__, [])
-        trace_run_summary(elapsed_seconds, [])
+        trace_run_summary(elapsed_seconds, [], "failed")
         print_failure_summary(str(exc), elapsed_seconds)
         return 1
 
@@ -147,10 +150,10 @@ def main() -> int:
                 loop_result.error_type or "Exception",
                 context.memory.tools_called,
             )
-        trace_run_summary(elapsed_seconds, context.memory.tools_called)
+        trace_run_summary(elapsed_seconds, context.memory.tools_called, loop_result.status)
         print_failure_summary(error_message, elapsed_seconds)
         return 1
 
-    trace_run_summary(elapsed_seconds, context.memory.tools_called)
+    trace_run_summary(elapsed_seconds, context.memory.tools_called, loop_result.status)
     print_success_summary(FINISH_SUCCESS_MESSAGE, elapsed_seconds)
     return 0

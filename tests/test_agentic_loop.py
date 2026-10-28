@@ -52,6 +52,7 @@ def tool_call_sequence(*tool_calls: ToolCall):
     [
         (LoopResult(status="success"), 0, FINISH_SUCCESS_MESSAGE),
         (LoopResult(status="max_iterations_reached"), 1, MAX_ITERATIONS_REACHED_MESSAGE),
+        (LoopResult(status="failed", error="request failed", error_type="ValueError"), 1, "request failed"),
     ],
 )
 def test_main_reports_tool_calls_from_context(
@@ -65,10 +66,12 @@ def test_main_reports_tool_calls_from_context(
     context = build_context(tmp_path)
     context.memory.record_tool_call("read_file")
     context.memory.record_tool_call("finish")
-    summaries: list[list[str]] = []
+    summaries: list[tuple[list[str], str]] = []
     monkeypatch.setattr(
         "ark.agentic_loop.parse_args",
-        lambda: SimpleNamespace(workspace_path=str(tmp_path), test_runner="maven", test_timeout=600),
+        lambda: SimpleNamespace(
+            workspace_path=str(tmp_path), test_runner="maven", test_timeout=600, max_iterations=40
+        ),
     )
     prepared = []
 
@@ -80,12 +83,14 @@ def test_main_reports_tool_calls_from_context(
     monkeypatch.setattr("ark.agentic_loop.agentic_loop", lambda _context: loop_result)
     monkeypatch.setattr(
         "ark.agentic_loop.trace_run_summary",
-        lambda _elapsed, tools_called: summaries.append(tools_called.copy()),
+        lambda _elapsed, tools_called, status: summaries.append((tools_called.copy(), status)),
     )
 
     assert main() == exit_code
-    assert prepared == [(str(tmp_path), {"test_runner": "maven", "test_timeout": 600})]
-    assert summaries == [["read_file", "finish"]]
+    assert prepared == [
+        (str(tmp_path), {"test_runner": "maven", "test_timeout": 600, "max_iterations": 40})
+    ]
+    assert summaries == [(["read_file", "finish"], loop_result.status)]
     assert message in capsys.readouterr().out
 
 
@@ -264,7 +269,7 @@ def test_max_iterations_rolls_back_transaction(monkeypatch, tmp_path: Path) -> N
         "ark.agentic_loop.invoke_model",
         tool_call_sequence(ToolCall("explore", "list_files", ".")),
     )
-    monkeypatch.setattr("ark.agentic_loop.MAX_ITERATIONS", 1)
+    context.max_iterations = 1
     monkeypatch.setattr("ark.agentic_loop.run_tool", lambda *_args: ToolResult("files"))
 
     result = agentic_loop(context)
@@ -288,3 +293,15 @@ def test_agentic_loop_returns_failure(monkeypatch, tmp_path: Path) -> None:
     assert result.error == "missing content"
     assert result.error_type == "ValueError"
     assert context.memory.tools_called == []
+
+
+def test_loop_uses_context_iteration_limit(monkeypatch, tmp_path: Path) -> None:
+    context = build_context(tmp_path)
+    context.max_iterations = 3
+    monkeypatch.setattr("ark.agentic_loop.invoke_model", tool_call_sequence(
+        *[ToolCall("inspect", "list_files", ".") for _ in range(3)]
+    ))
+    monkeypatch.setattr("ark.agentic_loop.run_tool", lambda *_args: ToolResult("files"))
+    result = agentic_loop(context)
+    assert result.status == "max_iterations_reached"
+    assert context.memory.tools_called == ["list_files"] * 3

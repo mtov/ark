@@ -7,14 +7,17 @@ import sys
 from dataclasses import dataclass
 from difflib import unified_diff
 from pathlib import Path
+from typing import Iterator
 
 from .guards import resolve_tool_path
 from .inputs import Context, create_workspace_snapshot
-from .protocol import ToolCall, parse_edit_file_request
+from .memory import MAX_OBSERVATION_CHARS
+from .protocol import ToolCall, parse_edit_file_request, parse_read_file_request
 from .traces import trace_edit_event, trace_test_event
 
 
 MAX_FIND_TEXT_MATCHES = 20
+MAX_LIST_ENTRIES = 100
 SKIPPED_DIRECTORIES = {".git", ".venv", "__pycache__", "target"}
 TEST_COMMANDS = {
     "pytest": (sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"),
@@ -27,6 +30,7 @@ class ToolResult:
     output: str
     note: str | None = None
     skipped: bool = False
+    file_path: Path | None = None
 
 
 def _resolve_workspace_target(action_input: str, workspace_path: Path) -> Path | str:
@@ -34,6 +38,21 @@ def _resolve_workspace_target(action_input: str, workspace_path: Path) -> Path |
         return resolve_tool_path(action_input, workspace_path)
     except ValueError as exc:
         return str(exc)
+
+
+def _workspace_entries(path: Path, workspace_path: Path) -> Iterator[Path]:
+    for directory, directories, files in os.walk(path):
+        directories[:] = sorted(
+            name for name in directories
+            if name not in SKIPPED_DIRECTORIES and not (Path(directory) / name).is_symlink()
+        )
+        for name in sorted(directories + files):
+            entry = Path(directory) / name
+            try:
+                resolve_tool_path(str(entry), workspace_path)
+            except ValueError:
+                continue
+            yield entry
 
 
 def list_files(action_input: str, workspace_path: Path) -> str:
@@ -46,24 +65,69 @@ def list_files(action_input: str, workspace_path: Path) -> str:
     if not path.is_dir():
         return f"Path is a file, not a directory. Use read_file instead: {path}"
 
-    entries = sorted(item.name for item in path.iterdir())
+    entries: list[str] = []
+    footer = "Listing truncated. Use list_files on a subdirectory shown above."
+    length = 0
+    for entry in _workspace_entries(path, workspace_path):
+        label = entry.relative_to(workspace_path.resolve()).as_posix()
+        if entry.is_dir():
+            label += "/"
+        if len(entries) == MAX_LIST_ENTRIES or length + len(label) + 1 > MAX_OBSERVATION_CHARS - len(footer) - 1:
+            return "\n".join([*entries, footer])
+        entries.append(label)
+        length += len(label) + 1
     if not entries:
         return f"Directory is empty: {path}"
 
     return "\n".join(entries)
 
 
-def read_file(action_input: str, workspace_path: Path) -> str:
-    path = _resolve_workspace_target(action_input, workspace_path)
+def read_file(action_input: str, workspace_path: Path) -> ToolResult:
+    try:
+        request = parse_read_file_request(action_input)
+    except ValueError as exc:
+        return ToolResult(str(exc))
+    path = _resolve_workspace_target(request.path, workspace_path)
     if isinstance(path, str):
-        return path
+        return ToolResult(path)
 
     if not path.exists():
-        return f"File not found inside the workspace: {path}"
+        return ToolResult(f"File not found inside the workspace: {path}")
     if not path.is_file():
-        return f"Path is not a file: {path}"
+        return ToolResult(f"Path is not a file: {path}")
 
-    return path.read_text(encoding="utf-8")
+    try:
+        lines = path.read_text(encoding="utf-8").splitlines()
+    except (OSError, UnicodeError) as exc:
+        return ToolResult(f"Could not read file: {path}: {exc}")
+    label = path.relative_to(workspace_path.resolve()).as_posix()
+    if not lines and request.end is None:
+        return ToolResult(f"File: {label}\nFile is empty.", file_path=path)
+    if request.start > len(lines):
+        return ToolResult(f"Start line {request.start} exceeds file length ({len(lines)} lines).")
+    end = min(request.end or len(lines), len(lines))
+    header = f"File: {label}\nLines: {request.start}-{end} of {len(lines)}\n"
+    footer = f"\nRead truncated. Continue with read_file: {label} | {end}:{end}"
+    budget = MAX_OBSERVATION_CHARS - len(header) - len(footer)
+    rendered: list[str] = []
+    length = 0
+    for number in range(request.start, end + 1):
+        line = f"{number}: {lines[number - 1]}"
+        if length + len(line) + 1 > budget:
+            break
+        rendered.append(line)
+        length += len(line) + 1
+    if not rendered:
+        return ToolResult(
+            f"Line {request.start} is too long to fit in one observation ({MAX_OBSERVATION_CHARS} characters). "
+            "Request a later line range to read the rest of the file."
+        )
+    last = request.start + len(rendered) - 1
+    header = f"File: {label}\nLines: {request.start}-{last} of {len(lines)}\n"
+    output = header + "\n".join(rendered)
+    if last < end:
+        output += f"\nRead truncated. Continue with read_file: {label} | {last + 1}:{end}"
+    return ToolResult(output, file_path=path)
 
 
 def parse_find_text_input(action_input: str) -> tuple[str, str] | str:
@@ -100,9 +164,7 @@ def find_text(action_input: str, workspace_path: Path) -> str:
 
     matches: list[str] = []
 
-    for file_path in sorted(path.rglob("*")):
-        if any(part in SKIPPED_DIRECTORIES for part in file_path.parts):
-            continue
+    for file_path in _workspace_entries(path, workspace_path):
         if not file_path.is_file():
             continue
 
@@ -273,20 +335,24 @@ def run_tool(
     if tool_call.name == "list_files":
         return ToolResult(list_files(tool_call.args, workspace_path))
     if tool_call.name == "read_file":
-        if context.memory.has_current_file_read(tool_call.args):
+        if context.memory.has_current_file_read(tool_call.args, workspace_path):
             return ToolResult(
                 "This read_file result is already available in the recent context. "
                 "Use the existing observation instead of reading the file again.",
                 note="skipped: already in context",
                 skipped=True,
             )
-        return ToolResult(read_file(tool_call.args, workspace_path))
+        return read_file(tool_call.args, workspace_path)
     if tool_call.name == "find_text":
         return ToolResult(find_text(tool_call.args, workspace_path))
     if tool_call.name == "run_tests":
         return ToolResult(run_tests(context))
     if tool_call.name == "edit_file":
-        return ToolResult(edit_file(tool_call.args, context))
+        output = edit_file(tool_call.args, context)
+        file_path = None
+        if output.startswith("Edit applied successfully to "):
+            file_path = resolve_tool_path(parse_edit_file_request(tool_call.args).path, workspace_path)
+        return ToolResult(output, file_path=file_path)
 
     return ToolResult(
         f"Unsupported action '{tool_call.name}'. Use list_files, read_file, find_text, run_tests, edit_file, or finish."

@@ -22,6 +22,7 @@ WORKSPACE_INSTRUCTIONS_FILE_NAME = "AGENTS.md"
 USER_PROMPT_FILE_NAME = "prompt.txt"
 IGNORED_WORKSPACE_NAMES = ("evaluation",)
 TEST_TIMEOUTS = {"pytest": 30, "maven": 300}
+DEFAULT_MAX_ITERATIONS = 20
 
 
 @dataclass
@@ -31,6 +32,7 @@ class Context:
     workspace_path: Path
     test_runner: str = "pytest"
     test_timeout_seconds: int = TEST_TIMEOUTS["pytest"]
+    max_iterations: int = DEFAULT_MAX_ITERATIONS
     memory: Memory = field(default_factory=Memory)
     snapshot_path: Path | None = None
 
@@ -60,6 +62,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("workspace_path", help="Path to the test workspace directory")
     parser.add_argument("--test-runner", choices=TEST_TIMEOUTS, help="Test runner (default: config or pytest)")
     parser.add_argument("--test-timeout", type=_positive_int, help="Timeout for each test run, in seconds")
+    parser.add_argument("--max-iterations", type=_positive_int, help="Maximum agent steps (default: config or 20)")
     return parser.parse_args()
 
 
@@ -220,11 +223,18 @@ def build_user_prompt(user_prompt: str, workspace_instructions: str | None = Non
 
 
 def prepare_run(
-    workspace_path_arg: str, *, test_runner: str | None = None, test_timeout: int | None = None
+    workspace_path_arg: str,
+    *,
+    test_runner: str | None = None,
+    test_timeout: int | None = None,
+    max_iterations: int | None = None,
 ) -> Context:
     clear_trace()
     config = load_config()
     runner, timeout = resolve_test_options(config, test_runner, test_timeout)
+    limit = max_iterations if max_iterations is not None else config.get("max_iterations", DEFAULT_MAX_ITERATIONS)
+    if type(limit) is not int or limit <= 0:
+        raise ValueError("max_iterations must be a positive integer.")
     source_workspace_path = resolve_workspace_path(workspace_path_arg)
     workspace_path = prepare_runtime_workspace(source_workspace_path)
     system_prompt = build_system_prompt(load_system_prompt(), workspace_path)
@@ -242,4 +252,5 @@ def prepare_run(
         workspace_path=workspace_path,
         test_runner=runner,
         test_timeout_seconds=timeout,
+        max_iterations=limit,
     )

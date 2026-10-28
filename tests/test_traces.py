@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from ark import traces
 from ark.models import TokenUsage
 from ark.protocol import ToolCall
@@ -118,7 +120,8 @@ def test_trace_error_records_failure_context(monkeypatch, tmp_path: Path) -> Non
     assert "tools_called: read_file, run_tests" in content
 
 
-def test_trace_run_summary_records_total_tokens_and_elapsed_time(monkeypatch, tmp_path: Path) -> None:
+@pytest.mark.parametrize("status", ["success", "max_iterations_reached", "failed"])
+def test_trace_run_summary_records_total_tokens_and_elapsed_time(monkeypatch, tmp_path: Path, status) -> None:
     log_path = tmp_path / "agent_trace.log"
     monkeypatch.setattr(traces, "LOG_PATH", log_path)
 
@@ -126,14 +129,17 @@ def test_trace_run_summary_records_total_tokens_and_elapsed_time(monkeypatch, tm
     traces.record_response_usage(
         token_usage=TokenUsage(input_tokens=2, output_tokens=3, total_tokens=5),
     )
-    traces.trace_run_summary(12.345, ["list_files", "read_file", "edit_file", "finish", "run_tests"])
+    traces.trace_run_summary(12.345, ["list_files", "read_file", "edit_file", "finish", "run_tests"], status)
 
     content = log_path.read_text(encoding="utf-8")
 
     assert "[run_summary]" in content
+    assert f"status: {status}" in content
     assert "total_tokens: 5" in content
     assert "elapsed_seconds: 12.35" in content
     assert "tool_counts: list_files=1, read_file=1, edit_file=1, finish=1, run_tests=1" in content
+
+
 def test_trace_workspace_event_records_rollback_reason(monkeypatch, tmp_path: Path) -> None:
     log_path = tmp_path / "agent_trace.log"
     monkeypatch.setattr(traces, "LOG_PATH", log_path)

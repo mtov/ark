@@ -104,23 +104,25 @@ def test_load_config_reports_invalid_json(tmp_path: Path, monkeypatch) -> None:
 
 
 @pytest.mark.parametrize(
-    ("config_options", "overrides", "runner", "timeout"),
+    ("config_options", "overrides", "runner", "timeout", "limit"),
     [
-        ({}, {}, "pytest", 30),
-        ({"test_runner": "maven"}, {}, "maven", 300),
-        ({"test_runner": "maven", "test_timeout_seconds": 180}, {}, "maven", 180),
+        ({}, {}, "pytest", 30, 20),
+        ({"test_runner": "maven"}, {}, "maven", 300, 20),
+        ({"test_runner": "maven", "test_timeout_seconds": 180}, {}, "maven", 180, 20),
         (
             {"test_runner": "pytest", "test_timeout_seconds": 180},
             {"test_runner": "maven", "test_timeout": 600},
-            "maven", 600,
+            "maven", 600, 20,
         ),
-        ({"test_runner": "maven"}, {"test_runner": "pytest"}, "pytest", 30),
-        ({"test_runner": "maven"}, {"test_timeout": 600}, "maven", 600),
-        ({"test_timeout_seconds": 180}, {"test_runner": "maven"}, "maven", 180),
+        ({"test_runner": "maven"}, {"test_runner": "pytest"}, "pytest", 30, 20),
+        ({"test_runner": "maven"}, {"test_timeout": 600}, "maven", 600, 20),
+        ({"test_timeout_seconds": 180}, {"test_runner": "maven"}, "maven", 180, 20),
+        ({"max_iterations": 30}, {}, "pytest", 30, 30),
+        ({"max_iterations": 30}, {"max_iterations": 40}, "pytest", 30, 40),
     ],
 )
 def test_prepare_run_keeps_agents_md_out_of_system_prompt(
-    tmp_path: Path, monkeypatch, config_options, overrides, runner, timeout
+    tmp_path: Path, monkeypatch, config_options, overrides, runner, timeout, limit
 ) -> None:
     source_workspace = tmp_path / "source"
     source_workspace.mkdir()
@@ -172,6 +174,7 @@ def test_prepare_run_keeps_agents_md_out_of_system_prompt(
     assert traced_requests == [context.user_prompt]
     assert context.test_runner == runner
     assert context.test_timeout_seconds == timeout
+    assert context.max_iterations == limit
     assert context.model.timeout_seconds == 30
 
 
@@ -216,6 +219,9 @@ def test_parse_args_accepts_test_options(monkeypatch, options, runner, timeout) 
         ["--test-timeout", "-1"],
         ["--test-timeout", "1.5"],
         ["--test-timeout", "abc"],
+        ["--max-iterations", "0"],
+        ["--max-iterations", "-1"],
+        ["--max-iterations", "1.5"],
     ],
 )
 def test_parse_args_rejects_invalid_test_options(monkeypatch, options) -> None:
@@ -231,5 +237,21 @@ def test_prepare_run_validates_options_before_copying_workspace(tmp_path: Path, 
     monkeypatch.setattr(inputs, "load_config", lambda: {"test_runner": "gradle"})
     monkeypatch.setattr(inputs, "prepare_runtime_workspace", lambda path: copies.append(path))
     with pytest.raises(ValueError, match="test_runner must be"):
+        inputs.prepare_run(str(tmp_path))
+    assert copies == []
+
+
+def test_parse_args_accepts_iteration_limit(monkeypatch) -> None:
+    monkeypatch.setattr(sys, "argv", ["ark", "workspace", "--max-iterations", "40"])
+    assert inputs.parse_args().max_iterations == 40
+
+
+@pytest.mark.parametrize("limit", [0, -1, True, 0.5, "20", None])
+def test_prepare_run_rejects_invalid_iteration_limit_before_copying(tmp_path: Path, monkeypatch, limit) -> None:
+    copies = []
+    monkeypatch.setattr(inputs, "clear_trace", lambda: None)
+    monkeypatch.setattr(inputs, "load_config", lambda: {"max_iterations": limit})
+    monkeypatch.setattr(inputs, "prepare_runtime_workspace", lambda path: copies.append(path))
+    with pytest.raises(ValueError, match="max_iterations must be a positive integer"):
         inputs.prepare_run(str(tmp_path))
     assert copies == []

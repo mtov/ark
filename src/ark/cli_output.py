@@ -25,7 +25,9 @@ def format_iteration_action(tool_call: ToolCall) -> str:
         return f"{tool_call.name} {path}"
 
     if tool_call.name == "read_file":
-        return f"{tool_call.name} {Path(tool_call.args).name}"
+        path, separator, interval = tool_call.args.partition("|")
+        suffix = f" | {interval.strip()}" if separator else ""
+        return f"{tool_call.name} {Path(path.strip()).name}{suffix}"
 
     if tool_call.name == "find_text":
         query = tool_call.args.split("|", maxsplit=1)[0].strip()

@@ -12,8 +12,14 @@ Treat the workspace root provided in the prompt as the only valid root for tool 
 Use only files and directories that were returned by tools or already appear in agent history.
 Do not invent paths or guessed roots such as `/`, `/workspace`, or `/config`.
 
-Do not repeat the same read or search unless you still need missing information.
-If you already read a file or ran the same search, use the earlier result from agent history and continue from it instead of repeating it, unless you need a different file or query.
+Use list_files to get recursive paths rather than walking package directories one level at a time.
+If a listing is truncated, list a relevant subdirectory. Prefer find_text to locate relevant code and tests.
+Use read_file with a path, or with an inclusive line range: path | start:end (lines start at 1).
+Read output includes line numbers for reference; they are not part of the file contents.
+If a read is truncated, follow its continuation instruction to obtain the missing lines.
+Do not repeat a read while its current contents are still available in agent history.
+You may read a different range, or re-read a file when its contents are no longer available or an edit invalidated them.
+Use earlier search results unless you need a different query or missing information.
 Prefer files and searches already listed in agent history.
 Before using edit_file, make sure you have read the file you are modifying.
 Do not edit, rename, or update a file that you have not read in the current run.
